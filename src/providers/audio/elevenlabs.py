@@ -1,0 +1,327 @@
+"""ElevenLabs audio provider for Hebrew TTS."""
+
+import logging
+from pathlib import Path
+from typing import Optional
+
+from elevenlabs import AsyncElevenLabs, VoiceSettings
+
+from ..base import (
+    AuthenticationError,
+    BaseAudioProvider,
+    ContentError,
+    ProviderError,
+    ProviderResult,
+    RateLimitError,
+    RetryConfig,
+)
+
+logger = logging.getLogger(__name__)
+
+# Hebrew-capable voices on ElevenLabs
+HEBREW_VOICES = {
+    "jessica": "EXAVITQu4vr4xnSDxMaL",  # Female, good for narration
+    "adam": "pNInz6obpgDQGcFmaJgB",  # Male, clear pronunciation
+    "rachel": "21m00Tcm4TlvDq8ikWAM",  # Female, soft
+    "josh": "TxGEqnHWrfWFTfGW9XjX",  # Male, natural
+}
+
+
+class ElevenLabsProvider(BaseAudioProvider):
+    """ElevenLabs TTS provider with Hebrew support."""
+
+    # ElevenLabs chunk size limit for multilingual model
+    MAX_CHUNK_SIZE = 5000
+
+    def __init__(
+        self,
+        api_key: str,
+        voice_id: str = "EXAVITQu4vr4xnSDxMaL",  # Jessica
+        model_id: str = "eleven_multilingual_v2",
+        stability: float = 0.5,
+        similarity_boost: float = 0.75,
+        retry_config: Optional[RetryConfig] = None,
+        timeout: float = 60.0,
+    ):
+        super().__init__(
+            name="elevenlabs",
+            api_key=api_key,
+            retry_config=retry_config,
+            timeout=timeout,
+        )
+        self.voice_id = voice_id
+        self.model_id = model_id
+        self.stability = stability
+        self.similarity_boost = similarity_boost
+        self._client: Optional[AsyncElevenLabs] = None
+
+    @property
+    def client(self) -> AsyncElevenLabs:
+        """Get or create ElevenLabs client."""
+        if self._client is None:
+            self._client = AsyncElevenLabs(api_key=self._api_key)
+        return self._client
+
+    async def health_check(self) -> bool:
+        """Check if ElevenLabs API is accessible."""
+        try:
+            # Try to get user info to verify API key
+            user = await self.client.user.get()
+            return user is not None
+        except Exception as e:
+            logger.error(f"ElevenLabs health check failed: {e}")
+            return False
+
+    async def get_available_voices(self) -> list[dict]:
+        """Get list of available voices."""
+        try:
+            voices = await self.client.voices.get_all()
+            return [
+                {
+                    "voice_id": v.voice_id,
+                    "name": v.name,
+                    "category": v.category,
+                    "labels": v.labels,
+                }
+                for v in voices.voices
+            ]
+        except Exception as e:
+            logger.error(f"Failed to get voices: {e}")
+            raise ProviderError(f"Failed to get voices: {e}", self.name)
+
+    def _chunk_text(self, text: str) -> list[str]:
+        """Split text into chunks for long content.
+
+        Hebrew text is split on sentence boundaries (periods, question marks,
+        exclamation marks) to maintain natural speech flow.
+        """
+        if len(text) <= self.MAX_CHUNK_SIZE:
+            return [text]
+
+        chunks = []
+        current_chunk = ""
+
+        # Split on sentence boundaries
+        import re
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) + 1 <= self.MAX_CHUNK_SIZE:
+                current_chunk += (" " + sentence) if current_chunk else sentence
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = sentence
+
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+
+        return chunks
+
+    def _handle_api_error(self, error: Exception) -> None:
+        """Convert API errors to provider errors."""
+        error_str = str(error).lower()
+
+        if "401" in error_str or "unauthorized" in error_str or "invalid api key" in error_str:
+            raise AuthenticationError(
+                "Invalid ElevenLabs API key",
+                self.name,
+            )
+
+        if "429" in error_str or "rate limit" in error_str:
+            raise RateLimitError(
+                "ElevenLabs rate limit exceeded",
+                self.name,
+                retry_after=60.0,  # Default retry after 1 minute
+            )
+
+        if "content" in error_str or "inappropriate" in error_str:
+            raise ContentError(
+                f"Content rejected by ElevenLabs: {error}",
+                self.name,
+            )
+
+        raise ProviderError(str(error), self.name)
+
+    async def _generate_chunk(
+        self,
+        text: str,
+        voice_id: str,
+    ) -> bytes:
+        """Generate audio for a single text chunk."""
+        try:
+            voice_settings = VoiceSettings(
+                stability=self.stability,
+                similarity_boost=self.similarity_boost,
+            )
+
+            audio_generator = await self.client.text_to_speech.convert(
+                voice_id=voice_id,
+                model_id=self.model_id,
+                text=text,
+                voice_settings=voice_settings,
+            )
+
+            # Collect all audio chunks
+            audio_chunks = []
+            async for chunk in audio_generator:
+                audio_chunks.append(chunk)
+
+            return b"".join(audio_chunks)
+
+        except Exception as e:
+            self._handle_api_error(e)
+
+    def _estimate_duration(self, text: str) -> float:
+        """Estimate audio duration from text length.
+
+        Hebrew speech averages ~3-4 words per second, roughly 15 chars/second.
+        """
+        # Remove spaces for character count
+        char_count = len(text.replace(" ", ""))
+        # Estimate ~15 characters per second for Hebrew
+        return char_count / 15.0
+
+    def _get_actual_duration(self, audio_bytes: bytes) -> float:
+        """Get actual duration from MP3 audio bytes.
+
+        Uses mutagen for accurate duration calculation.
+        """
+        try:
+            from io import BytesIO
+            from mutagen.mp3 import MP3
+
+            audio_file = BytesIO(audio_bytes)
+            audio = MP3(audio_file)
+            return audio.info.length
+        except Exception:
+            # Fallback: estimate from file size
+            # MP3 at 128kbps = ~16KB per second
+            return len(audio_bytes) / 16000
+
+    async def generate_speech(
+        self,
+        text: str,
+        voice_id: Optional[str] = None,
+        output_path: Optional[Path] = None,
+        **kwargs,
+    ) -> tuple[bytes, float]:
+        """Generate Hebrew speech from text.
+
+        Args:
+            text: Hebrew text to convert to speech
+            voice_id: Optional voice ID (defaults to configured voice)
+            output_path: Optional path to save the audio file
+            **kwargs: Additional parameters (unused)
+
+        Returns:
+            Tuple of (audio_bytes, duration_seconds)
+        """
+        voice_id = voice_id or self.voice_id
+
+        # Validate text
+        if not text or not text.strip():
+            raise ProviderError("Empty text provided", self.name, recoverable=False)
+
+        # Clean text for Hebrew (remove extra whitespace)
+        text = " ".join(text.split())
+
+        # Check if text needs chunking
+        chunks = self._chunk_text(text)
+
+        if len(chunks) == 1:
+            # Single chunk - simple case
+            async def _generate():
+                return await self._generate_chunk(text, voice_id)
+
+            result = await self._retry_operation(_generate, "generate_speech")
+
+            if not result.success:
+                raise result.error or ProviderError("Speech generation failed", self.name)
+
+            audio_bytes = result.data
+
+        else:
+            # Multiple chunks - concatenate audio
+            logger.info(f"Text exceeds max length, splitting into {len(chunks)} chunks")
+
+            audio_parts = []
+            for i, chunk in enumerate(chunks):
+                async def _generate_chunk():
+                    return await self._generate_chunk(chunk, voice_id)
+
+                result = await self._retry_operation(
+                    _generate_chunk,
+                    f"generate_speech_chunk_{i+1}"
+                )
+
+                if not result.success:
+                    raise result.error or ProviderError(
+                        f"Speech generation failed for chunk {i+1}",
+                        self.name
+                    )
+
+                audio_parts.append(result.data)
+
+            # Concatenate audio parts
+            audio_bytes = self._concatenate_audio(audio_parts)
+
+        # Get actual duration
+        duration = self._get_actual_duration(audio_bytes)
+
+        # Save to file if path provided
+        if output_path:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(audio_bytes)
+            logger.info(f"Audio saved to {output_path} ({duration:.2f}s)")
+
+        return audio_bytes, duration
+
+    def _concatenate_audio(self, audio_parts: list[bytes]) -> bytes:
+        """Concatenate multiple MP3 audio parts.
+
+        For simplicity, we concatenate the raw bytes. For production,
+        consider using pydub or ffmpeg for proper concatenation.
+        """
+        # Simple concatenation works for MP3 files from the same source
+        return b"".join(audio_parts)
+
+    async def generate_speech_with_result(
+        self,
+        text: str,
+        voice_id: Optional[str] = None,
+        output_path: Optional[Path] = None,
+        **kwargs,
+    ) -> ProviderResult[tuple[bytes, float]]:
+        """Generate speech and return full result with metadata.
+
+        Args:
+            text: Hebrew text to convert to speech
+            voice_id: Optional voice ID
+            output_path: Optional path to save audio
+            **kwargs: Additional parameters
+
+        Returns:
+            ProviderResult containing (audio_bytes, duration) tuple
+        """
+        async def _generate():
+            return await self.generate_speech(text, voice_id, output_path, **kwargs)
+
+        result = await self._retry_operation(_generate, "generate_speech")
+
+        if result.success:
+            audio_bytes, duration = result.data
+            result.metadata = {
+                "text_length": len(text),
+                "duration": duration,
+                "voice_id": voice_id or self.voice_id,
+                "model_id": self.model_id,
+                "output_path": str(output_path) if output_path else None,
+            }
+
+        return result
+
+    async def close(self) -> None:
+        """Close the provider and cleanup resources."""
+        await super().close()
+        self._client = None

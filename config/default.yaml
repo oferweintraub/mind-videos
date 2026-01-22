@@ -1,0 +1,60 @@
+# Hebrew Democracy Video Pipeline - Default Configuration
+# API keys should be set in .env file, not here
+
+llm:
+  provider: claude
+  claude_model: claude-sonnet-4-5-20250929
+  gemini_model: gemini-3-flash-preview
+  max_retries: 3
+  timeout: 60
+
+audio:
+  provider: elevenlabs
+  voice_id: EXAVITQu4vr4xnSDxMaL  # Jessica (Hebrew-capable)
+  voice_name: Jessica
+  model_id: eleven_multilingual_v2
+  stability: 0.5
+  similarity_boost: 0.75
+
+video:
+  primary_provider: fal
+  fallback_provider: replicate
+  resolution: 480p
+  max_retries: 3
+  poll_interval: 5
+  timeout: 300
+
+  # Model identifiers
+  veed_model: fal-ai/veed-video
+  veed_replicate_model: veed/fabric-1.0
+  kling_model: fal-ai/kling-video/v2.5/pro
+  kling_replicate_model: klingai/kling-2.5-pro
+  sync_model: fal-ai/sync-lipsync-2-pro
+  sync_replicate_model: sync/lipsync-2-pro
+
+image:
+  provider: nano_banana
+  model: imagen-3.0-generate-002
+  aspect_ratio: "9:16"
+  number_of_images: 1
+
+subtitle:
+  font: Arial
+  font_size: 24
+  font_color: white
+  background_color: "black@0.5"
+  position: bottom
+  margin_v: 20
+
+pipeline:
+  default_workflow: 1
+  segments_min: 6
+  segments_max: 8
+  segment_duration_min: 6.0
+  segment_duration_max: 10.0
+  preview_segments: 4
+  quality_threshold: 0.7
+  max_remake_attempts: 2
+
+output_dir: output
+config_dir: config
