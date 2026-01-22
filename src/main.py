@@ -16,6 +16,7 @@ from .config import get_config, reload_config
 from .pipeline.orchestrator import PipelineOrchestrator, run_test
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -141,17 +142,23 @@ def test(
     "--workflow", "-w",
     type=click.Choice(["1", "2"]),
     default="1",
-    help="Workflow to use (1=image-based, 2=video-based)"
+    help="Workflow to use (1=image-based ~$4.50, 2=video-based ~$6)"
 )
 @click.option(
     "--preview",
     is_flag=True,
-    help="Generate preview (fewer segments)"
+    help="Generate preview (fewer segments, ~$1.50)"
 )
 @click.option(
     "--output", "-o",
     type=click.Path(path_type=Path),
     help="Output directory"
+)
+@click.option(
+    "--llm",
+    type=click.Choice(["claude", "gemini"]),
+    default=None,
+    help="Override LLM provider"
 )
 @click.pass_context
 def generate(
@@ -162,6 +169,7 @@ def generate(
     workflow: str,
     preview: bool,
     output: Optional[Path],
+    llm: Optional[str],
 ) -> None:
     """Generate a full video from topic.
 
@@ -169,24 +177,77 @@ def generate(
         python -m src.main generate \\
             --topic "government accountability" \\
             --angle "empathetic, solution-focused" \\
-            --image ./ref.png
+            --image ./ref.png \\
+            --workflow 1
+
+    Workflow 1 (Image-based, ~$4.50):
+        Uses VEED Fabric for direct image+audio to video with lip-sync.
+        Faster and cheaper, good for most use cases.
+
+    Workflow 2 (Video-based, ~$6):
+        Uses Kling for image+motion to video, then sync for lip-sync.
+        Higher quality motion, better for dynamic content.
     """
+    from .pipeline import Workflow1Pipeline, Workflow2Pipeline
+
+    # Update config if LLM override specified
+    if llm:
+        config = get_config()
+        config.llm.provider = llm
+
+    workflow_name = "Image-based (VEED Fabric)" if workflow == "1" else "Video-based (Kling + Sync)"
+    estimated_cost = "~$1.50" if preview else ("~$4.50" if workflow == "1" else "~$6.00")
+
     console.print(
         Panel.fit(
             f"[bold blue]Generating Video[/bold blue]\n\n"
             f"Topic: {topic}\n"
             f"Angle: {angle}\n"
-            f"Workflow: {workflow}\n"
-            f"Preview: {preview}",
+            f"Workflow: {workflow_name}\n"
+            f"Preview: {preview}\n"
+            f"Est. Cost: {estimated_cost}",
             title="Hebrew Video Pipeline",
         )
     )
 
-    # TODO: Implement full generation workflow
-    console.print(
-        "\n[yellow]Full generation not yet implemented.[/yellow]\n"
-        "Use 'test' command for single-segment testing."
-    )
+    async def _run_generate():
+        if workflow == "1":
+            pipeline = Workflow1Pipeline()
+        else:
+            pipeline = Workflow2Pipeline()
+
+        try:
+            final_path = await pipeline.run(
+                topic=topic,
+                angle=angle,
+                output_dir=output,
+                preview=preview,
+                reference_image=image,
+            )
+            return final_path
+        except Exception as e:
+            logger.error(f"Generation failed: {e}")
+            raise
+
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Generating video...", total=None)
+
+            final_path = asyncio.run(_run_generate())
+
+            progress.update(task, completed=True)
+
+        console.print("\n[bold green]Success![/bold green]\n")
+        console.print(f"Video: {final_path}")
+        console.print(f"\nOutput directory: {final_path.parent}")
+
+    except Exception as e:
+        console.print(f"\n[bold red]Error:[/bold red] {e}")
+        sys.exit(1)
 
 
 @cli.command()
