@@ -10,6 +10,8 @@ import google.generativeai as genai
 from ..base import (
     AuthenticationError,
     BaseImageProvider,
+    BatchItemResult,
+    BatchResult,
     ContentError,
     ProviderError,
     RateLimitError,
@@ -240,20 +242,25 @@ class NanoBananaProvider(BaseImageProvider):
         self,
         prompts: list[str],
         output_dir: Path,
+        fail_fast: bool = False,
         **kwargs,
-    ) -> list[tuple[bytes, dict]]:
+    ) -> BatchResult[tuple[bytes, dict]]:
         """Generate multiple images from a list of prompts.
 
         Args:
             prompts: List of image prompts
             output_dir: Directory to save images
+            fail_fast: If True, stop on first failure
             **kwargs: Additional parameters for each generation
 
         Returns:
-            List of (image_bytes, metadata) tuples
+            BatchResult with structured success/failure tracking
         """
+        import time
+
+        start_time = time.time()
         output_dir.mkdir(parents=True, exist_ok=True)
-        results = []
+        batch_result = BatchResult[tuple[bytes, dict]]()
 
         for i, prompt in enumerate(prompts):
             output_path = output_dir / f"image_{i:02d}.png"
@@ -265,11 +272,76 @@ class NanoBananaProvider(BaseImageProvider):
                     **kwargs,
                 )
                 metadata["index"] = i
-                results.append((image_bytes, metadata))
+
+                batch_result.items.append(
+                    BatchItemResult(
+                        index=i,
+                        success=True,
+                        data=(image_bytes, metadata),
+                    )
+                )
                 logger.info(f"Generated image {i+1}/{len(prompts)}")
 
-            except Exception as e:
+            except ProviderError as e:
                 logger.error(f"Failed to generate image {i+1}: {e}")
-                results.append((None, {"error": str(e), "index": i}))
+                batch_result.items.append(
+                    BatchItemResult(
+                        index=i,
+                        success=False,
+                        error=e,
+                    )
+                )
+                if fail_fast:
+                    logger.warning(f"Batch generation stopped at image {i+1} due to fail_fast")
+                    break
+
+            except Exception as e:
+                logger.error(f"Unexpected error generating image {i+1}: {e}")
+                batch_result.items.append(
+                    BatchItemResult(
+                        index=i,
+                        success=False,
+                        error=ProviderError(str(e), self.name),
+                    )
+                )
+                if fail_fast:
+                    logger.warning(f"Batch generation stopped at image {i+1} due to fail_fast")
+                    break
+
+        batch_result.total_duration = time.time() - start_time
+
+        # Log summary
+        logger.info(
+            f"Batch complete: {batch_result.success_count}/{len(prompts)} succeeded, "
+            f"{batch_result.failure_count} failed in {batch_result.total_duration:.2f}s"
+        )
+
+        return batch_result
+
+    async def generate_batch_legacy(
+        self,
+        prompts: list[str],
+        output_dir: Path,
+        **kwargs,
+    ) -> list[tuple[bytes, dict]]:
+        """Legacy batch generation returning list format for backwards compatibility.
+
+        Args:
+            prompts: List of image prompts
+            output_dir: Directory to save images
+            **kwargs: Additional parameters for each generation
+
+        Returns:
+            List of (image_bytes, metadata) tuples - None for failures
+        """
+        batch_result = await self.generate_batch(prompts, output_dir, **kwargs)
+
+        # Convert to legacy format
+        results = []
+        for item in batch_result.items:
+            if item.success and item.data:
+                results.append(item.data)
+            else:
+                results.append((None, {"error": str(item.error), "index": item.index}))
 
         return results

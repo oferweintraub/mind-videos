@@ -83,6 +83,97 @@ class ProviderResult(Generic[T]):
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class BatchItemResult(Generic[T]):
+    """Result for a single item in a batch operation."""
+
+    index: int
+    success: bool
+    data: Optional[T] = None
+    error: Optional[ProviderError] = None
+    attempts: int = 1
+
+
+@dataclass
+class BatchResult(Generic[T]):
+    """Result from a batch operation with structured error tracking."""
+
+    items: list[BatchItemResult[T]] = field(default_factory=list)
+    total_duration: float = 0.0
+
+    @property
+    def successful_items(self) -> list[BatchItemResult[T]]:
+        """Get all successful items."""
+        return [item for item in self.items if item.success]
+
+    @property
+    def failed_items(self) -> list[BatchItemResult[T]]:
+        """Get all failed items."""
+        return [item for item in self.items if not item.success]
+
+    @property
+    def success_count(self) -> int:
+        """Count of successful items."""
+        return len(self.successful_items)
+
+    @property
+    def failure_count(self) -> int:
+        """Count of failed items."""
+        return len(self.failed_items)
+
+    @property
+    def all_successful(self) -> bool:
+        """Check if all items succeeded."""
+        return self.failure_count == 0
+
+    @property
+    def all_failed(self) -> bool:
+        """Check if all items failed."""
+        return self.success_count == 0
+
+    def get_data(self) -> list[Optional[T]]:
+        """Get data from all items (None for failures)."""
+        return [item.data for item in self.items]
+
+    def get_successful_data(self) -> list[T]:
+        """Get data from successful items only."""
+        return [item.data for item in self.successful_items if item.data is not None]
+
+    def get_errors(self) -> list[tuple[int, ProviderError]]:
+        """Get all errors with their indices."""
+        return [(item.index, item.error) for item in self.failed_items if item.error]
+
+
+@dataclass
+class CircuitBreakerConfig:
+    """Configuration for circuit breaker behavior."""
+
+    failure_threshold: int = 5  # Failures before opening circuit
+    recovery_timeout: float = 60.0  # Seconds before trying again
+    half_open_max_calls: int = 3  # Test calls in half-open state
+
+
+class CircuitState(str, Enum):
+    """Circuit breaker states."""
+
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Failing fast, not making calls
+    HALF_OPEN = "half_open"  # Testing if service recovered
+
+
+@dataclass
+class TimeoutConfig:
+    """Per-operation timeout configuration."""
+
+    default: float = 60.0
+    health_check: float = 10.0
+    audio_generation: float = 120.0
+    image_generation: float = 120.0
+    video_generation: float = 300.0  # Video jobs need longer
+    video_polling: float = 600.0  # Max time to poll for video completion
+    llm_generation: float = 90.0
+
+
 class BaseProvider(ABC):
     """Abstract base class for all providers."""
 
@@ -92,13 +183,23 @@ class BaseProvider(ABC):
         api_key: str,
         retry_config: Optional[RetryConfig] = None,
         timeout: float = 60.0,
+        circuit_breaker_config: Optional[CircuitBreakerConfig] = None,
+        timeout_config: Optional[TimeoutConfig] = None,
     ):
         self.name = name
         self._api_key = api_key
         self.retry_config = retry_config or RetryConfig()
         self.timeout = timeout
+        self.timeout_config = timeout_config or TimeoutConfig(default=timeout)
         self._status = ProviderStatus.AVAILABLE
         self._http_client: Optional[httpx.AsyncClient] = None
+
+        # Circuit breaker state
+        self._circuit_config = circuit_breaker_config or CircuitBreakerConfig()
+        self._circuit_state = CircuitState.CLOSED
+        self._failure_count = 0
+        self._last_failure_time: Optional[float] = None
+        self._half_open_calls = 0
 
     @property
     def status(self) -> ProviderStatus:
@@ -109,6 +210,82 @@ class BaseProvider(ABC):
     def is_available(self) -> bool:
         """Check if provider is available."""
         return self._status != ProviderStatus.UNAVAILABLE
+
+    @property
+    def circuit_state(self) -> CircuitState:
+        """Get current circuit breaker state."""
+        return self._circuit_state
+
+    def _check_circuit(self) -> bool:
+        """Check if circuit allows the call. Returns True if call should proceed."""
+        import time
+
+        if self._circuit_state == CircuitState.CLOSED:
+            return True
+
+        if self._circuit_state == CircuitState.OPEN:
+            # Check if recovery timeout has passed
+            if self._last_failure_time is not None:
+                elapsed = time.time() - self._last_failure_time
+                if elapsed >= self._circuit_config.recovery_timeout:
+                    logger.info(f"{self.name}: Circuit transitioning to half-open")
+                    self._circuit_state = CircuitState.HALF_OPEN
+                    self._half_open_calls = 0
+                    return True
+            return False
+
+        if self._circuit_state == CircuitState.HALF_OPEN:
+            # Allow limited calls in half-open state
+            if self._half_open_calls < self._circuit_config.half_open_max_calls:
+                self._half_open_calls += 1
+                return True
+            return False
+
+        return True
+
+    def _record_success(self) -> None:
+        """Record a successful call - reset circuit breaker."""
+        if self._circuit_state == CircuitState.HALF_OPEN:
+            logger.info(f"{self.name}: Circuit closing after successful recovery")
+            self._circuit_state = CircuitState.CLOSED
+            self._status = ProviderStatus.AVAILABLE
+
+        self._failure_count = 0
+        self._last_failure_time = None
+
+    def _record_failure(self) -> None:
+        """Record a failed call - potentially open circuit."""
+        import time
+
+        self._failure_count += 1
+        self._last_failure_time = time.time()
+
+        if self._circuit_state == CircuitState.HALF_OPEN:
+            logger.warning(f"{self.name}: Circuit re-opening after failure in half-open state")
+            self._circuit_state = CircuitState.OPEN
+            self._status = ProviderStatus.UNAVAILABLE
+            return
+
+        if self._failure_count >= self._circuit_config.failure_threshold:
+            logger.warning(
+                f"{self.name}: Circuit opening after {self._failure_count} failures"
+            )
+            self._circuit_state = CircuitState.OPEN
+            self._status = ProviderStatus.UNAVAILABLE
+        elif self._failure_count >= self._circuit_config.failure_threshold // 2:
+            self._status = ProviderStatus.DEGRADED
+
+    def get_timeout_for_operation(self, operation: str) -> float:
+        """Get timeout for a specific operation type."""
+        timeouts = {
+            "health_check": self.timeout_config.health_check,
+            "audio": self.timeout_config.audio_generation,
+            "image": self.timeout_config.image_generation,
+            "video": self.timeout_config.video_generation,
+            "video_poll": self.timeout_config.video_polling,
+            "llm": self.timeout_config.llm_generation,
+        }
+        return timeouts.get(operation, self.timeout_config.default)
 
     async def get_http_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
@@ -151,15 +328,31 @@ class BaseProvider(ABC):
         operation: Callable[[], T],
         operation_name: str = "operation",
     ) -> ProviderResult[T]:
-        """Execute operation with retry logic."""
+        """Execute operation with retry logic and circuit breaker."""
         import time
 
         start_time = time.time()
         last_error: Optional[ProviderError] = None
 
+        # Check circuit breaker
+        if not self._check_circuit():
+            logger.warning(f"{self.name}: Circuit open, failing fast for {operation_name}")
+            return ProviderResult(
+                success=False,
+                error=ProviderError(
+                    f"Circuit breaker open for {self.name}",
+                    self.name,
+                    recoverable=True,
+                ),
+                attempts=0,
+                duration=time.time() - start_time,
+                metadata={"circuit_state": self._circuit_state.value},
+            )
+
         for attempt in range(self.retry_config.max_retries):
             try:
                 result = await operation()
+                self._record_success()
                 return ProviderResult(
                     success=True,
                     data=result,
@@ -180,6 +373,7 @@ class BaseProvider(ABC):
                 last_error = e
                 if not e.recoverable:
                     logger.error(f"{self.name}: Non-recoverable error in {operation_name}: {e}")
+                    self._record_failure()
                     break
 
                 logger.warning(
@@ -198,11 +392,15 @@ class BaseProvider(ABC):
                 delay = await self._calculate_delay(attempt)
                 await asyncio.sleep(delay)
 
+        # All retries exhausted - record failure for circuit breaker
+        self._record_failure()
+
         return ProviderResult(
             success=False,
             error=last_error,
             attempts=self.retry_config.max_retries,
             duration=time.time() - start_time,
+            metadata={"circuit_state": self._circuit_state.value},
         )
 
 

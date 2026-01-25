@@ -7,6 +7,10 @@ from .base import (
     BaseLLMProvider,
     BaseProvider,
     BaseVideoProvider,
+    BatchItemResult,
+    BatchResult,
+    CircuitBreakerConfig,
+    CircuitState,
     ContentError,
     FallbackProvider,
     ProviderError,
@@ -14,6 +18,7 @@ from .base import (
     ProviderStatus,
     RateLimitError,
     RetryConfig,
+    TimeoutConfig,
     TimeoutError,
 )
 
@@ -35,4 +40,12 @@ __all__ = [
     "ProviderResult",
     "RetryConfig",
     "FallbackProvider",
+    # Batch operations
+    "BatchResult",
+    "BatchItemResult",
+    # Circuit breaker
+    "CircuitBreakerConfig",
+    "CircuitState",
+    # Timeouts
+    "TimeoutConfig",
 ]

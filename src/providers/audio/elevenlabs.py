@@ -9,6 +9,8 @@ from elevenlabs import AsyncElevenLabs, VoiceSettings
 from ..base import (
     AuthenticationError,
     BaseAudioProvider,
+    BatchItemResult,
+    BatchResult,
     ContentError,
     ProviderError,
     ProviderResult,
@@ -325,3 +327,89 @@ class ElevenLabsProvider(BaseAudioProvider):
         """Close the provider and cleanup resources."""
         await super().close()
         self._client = None
+
+    async def generate_batch(
+        self,
+        texts: list[str],
+        output_dir: Path,
+        voice_id: Optional[str] = None,
+        fail_fast: bool = False,
+        **kwargs,
+    ) -> BatchResult[tuple[bytes, float]]:
+        """Generate speech for multiple texts with structured error tracking.
+
+        Args:
+            texts: List of texts to convert to speech
+            output_dir: Directory to save audio files
+            voice_id: Optional voice ID (defaults to configured voice)
+            fail_fast: If True, stop on first failure
+            **kwargs: Additional parameters
+
+        Returns:
+            BatchResult with structured success/failure tracking
+        """
+        import time
+
+        start_time = time.time()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        batch_result = BatchResult[tuple[bytes, float]]()
+
+        for i, text in enumerate(texts):
+            output_path = output_dir / f"audio_{i:02d}.mp3"
+
+            try:
+                audio_bytes, duration = await self.generate_speech(
+                    text=text,
+                    voice_id=voice_id,
+                    output_path=output_path,
+                    **kwargs,
+                )
+
+                batch_result.items.append(
+                    BatchItemResult(
+                        index=i,
+                        success=True,
+                        data=(audio_bytes, duration),
+                    )
+                )
+                logger.info(f"Generated audio {i+1}/{len(texts)} ({duration:.2f}s)")
+
+            except ProviderError as e:
+                logger.error(f"Failed to generate audio {i+1}: {e}")
+                batch_result.items.append(
+                    BatchItemResult(
+                        index=i,
+                        success=False,
+                        error=e,
+                    )
+                )
+                if fail_fast:
+                    logger.warning(f"Batch generation stopped at audio {i+1} due to fail_fast")
+                    break
+
+            except Exception as e:
+                logger.error(f"Unexpected error generating audio {i+1}: {e}")
+                batch_result.items.append(
+                    BatchItemResult(
+                        index=i,
+                        success=False,
+                        error=ProviderError(str(e), self.name),
+                    )
+                )
+                if fail_fast:
+                    logger.warning(f"Batch generation stopped at audio {i+1} due to fail_fast")
+                    break
+
+        batch_result.total_duration = time.time() - start_time
+
+        # Log summary
+        total_audio_duration = sum(
+            item.data[1] for item in batch_result.successful_items if item.data
+        )
+        logger.info(
+            f"Batch complete: {batch_result.success_count}/{len(texts)} succeeded, "
+            f"total audio: {total_audio_duration:.2f}s, "
+            f"processing time: {batch_result.total_duration:.2f}s"
+        )
+
+        return batch_result
