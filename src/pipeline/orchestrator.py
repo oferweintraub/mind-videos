@@ -238,6 +238,136 @@ class PipelineOrchestrator:
 
         return result
 
+    async def process_segments_parallel(
+        self,
+        segments: list[Segment],
+        images: list[bytes],
+        output_dir: Path,
+        max_concurrent: int = 5,
+    ) -> list[SegmentResult]:
+        """Process multiple segments in parallel.
+
+        Args:
+            segments: List of segments to process
+            images: List of image bytes (one per segment)
+            output_dir: Directory to save outputs
+            max_concurrent: Maximum concurrent operations
+
+        Returns:
+            List of SegmentResult objects
+        """
+        import time
+
+        if not self._initialized:
+            await self.initialize()
+
+        if len(segments) != len(images):
+            raise ValueError(
+                f"Segments ({len(segments)}) and images ({len(images)}) must have same length"
+            )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        start_time = time.time()
+
+        # Phase 1: Generate all audio in parallel
+        logger.info(f"Phase 1: Generating {len(segments)} audio tracks in parallel...")
+        audio_start = time.time()
+
+        async def generate_audio_for_segment(segment: Segment) -> tuple[int, bytes, float]:
+            audio_path = output_dir / f"segment_{segment.index:02d}_audio.mp3"
+            audio_bytes, duration = await self.generate_audio(
+                text=segment.text,
+                output_path=audio_path,
+            )
+            return segment.index, audio_bytes, duration
+
+        audio_tasks = [generate_audio_for_segment(seg) for seg in segments]
+        audio_results = await asyncio.gather(*audio_tasks, return_exceptions=True)
+
+        # Process audio results
+        audio_data = {}  # index -> (bytes, duration)
+        for result in audio_results:
+            if isinstance(result, Exception):
+                logger.error(f"Audio generation failed: {result}")
+            else:
+                idx, audio_bytes, duration = result
+                audio_data[idx] = (audio_bytes, duration)
+                logger.info(f"Audio {idx} complete: {duration:.2f}s")
+
+        audio_elapsed = time.time() - audio_start
+        logger.info(f"Phase 1 complete: {len(audio_data)}/{len(segments)} audio in {audio_elapsed:.1f}s")
+
+        # Phase 2: Generate all videos in parallel
+        logger.info(f"Phase 2: Generating {len(segments)} videos in parallel...")
+        video_start = time.time()
+
+        async def generate_video_for_segment(
+            segment: Segment, image: bytes
+        ) -> tuple[int, bytes, dict]:
+            if segment.index not in audio_data:
+                raise ValueError(f"No audio for segment {segment.index}")
+
+            audio_bytes, _ = audio_data[segment.index]
+            video_path = output_dir / f"segment_{segment.index:02d}_video.mp4"
+
+            video_bytes, metadata = await self.generate_video(
+                image=image,
+                audio=audio_bytes,
+                output_path=video_path,
+            )
+            return segment.index, video_bytes, metadata
+
+        video_tasks = [
+            generate_video_for_segment(seg, img)
+            for seg, img in zip(segments, images)
+            if seg.index in audio_data
+        ]
+        video_results = await asyncio.gather(*video_tasks, return_exceptions=True)
+
+        video_elapsed = time.time() - video_start
+        logger.info(f"Phase 2 complete in {video_elapsed:.1f}s")
+
+        # Build final results
+        results = []
+        for segment, image in zip(segments, images):
+            result = SegmentResult(segment=segment)
+
+            if segment.index in audio_data:
+                audio_bytes, audio_duration = audio_data[segment.index]
+                result.audio_bytes = audio_bytes
+                result.audio_duration = audio_duration
+                segment.audio_path = str(output_dir / f"segment_{segment.index:02d}_audio.mp3")
+                segment.audio_duration = audio_duration
+
+            # Find video result
+            for vr in video_results:
+                if isinstance(vr, Exception):
+                    continue
+                idx, video_bytes, metadata = vr
+                if idx == segment.index:
+                    result.video_bytes = video_bytes
+                    result.video_duration = metadata.get("duration") or result.audio_duration
+                    segment.video_path = str(output_dir / f"segment_{segment.index:02d}_video.mp4")
+                    segment.video_duration = result.video_duration
+                    break
+            else:
+                # Check if there was an error
+                for vr in video_results:
+                    if isinstance(vr, Exception):
+                        result.error = str(vr)
+                        break
+
+            results.append(result)
+
+        total_elapsed = time.time() - start_time
+        successful = sum(1 for r in results if r.video_bytes is not None)
+        logger.info(
+            f"Parallel processing complete: {successful}/{len(segments)} segments "
+            f"in {total_elapsed:.1f}s (audio: {audio_elapsed:.1f}s, video: {video_elapsed:.1f}s)"
+        )
+
+        return results
+
     async def test_single_segment(
         self,
         text: str,

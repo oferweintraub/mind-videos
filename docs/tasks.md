@@ -271,6 +271,42 @@
 
 ---
 
+## Phase 8: Quality Refinement 🎯 HIGH PRIORITY
+
+> **Tomorrow's Focus:** Go through these one by one to achieve smooth, lifelike results.
+
+### 8.1 Lip-sync Quality
+- [ ] **8.1.1** Evaluate VEED Fabric lip-sync accuracy on Hebrew speech
+- [ ] **8.1.2** Test alternative lip-sync models (sync/lipsync-2-pro)
+- [ ] **8.1.3** Experiment with audio preprocessing for better sync
+- [ ] **8.1.4** Document optimal settings for Hebrew content
+
+### 8.2 Character Consistency
+- [ ] **8.2.1** Fine-tune Nano Banana Pro prompts for better face consistency
+- [ ] **8.2.2** Test prompt variations for expression control
+- [ ] **8.2.3** Evaluate mosaic grid size (2x3 vs 3x3)
+- [ ] **8.2.4** Document best practices for character prompts
+
+### 8.3 Transition Timing
+- [ ] **8.3.1** Test fade duration variations (0.3s, 0.5s, 0.7s)
+- [ ] **8.3.2** Experiment with transition types (fade, dissolve, wipe)
+- [ ] **8.3.3** Optimize natural continuation between same-image segments
+- [ ] **8.3.4** Add configurable transition settings
+
+### 8.4 Audio Pacing & Emotion
+- [ ] **8.4.1** Test ElevenLabs v3 stability/similarity settings
+- [ ] **8.4.2** Experiment with speech rate adjustments
+- [ ] **8.4.3** Test emotional tone variations (serious, determined, empathetic)
+- [ ] **8.4.4** Add per-segment voice settings support
+
+### 8.5 Resolution & Final Quality
+- [ ] **8.5.1** Test 720p output quality vs 480p
+- [ ] **8.5.2** Evaluate cost/quality tradeoff at higher resolution
+- [ ] **8.5.3** Add resolution selection to CLI
+- [ ] **8.5.4** Final output optimization (bitrate, codec settings)
+
+---
+
 ## Testing Checklist (Per Task)
 
 Before marking any task DONE:
@@ -294,7 +330,9 @@ Before marking any task DONE:
 | Phase 4: Workflow 2 | 16 | 12 | 75% |
 | Phase 5: Content Brief | 20 | 18 | 90% |
 | Phase 6: Error Handling | 19 | 17 | 89% |
-| Phase 7: Mosaic Images | 17 | 0 | 0% |
-| **Total** | **129** | **88** | **68%** |
+| Phase 7: Mosaic Images | 17 | 10 | 59% |
+| Phase 8: Quality Refinement | 17 | 0 | 0% |
+| **Total** | **146** | **98** | **67%** |
 
-> Note: Remaining tasks are primarily unit/integration tests that require API keys to run. Phase 7 is the new mosaic-based image generation workflow.
+> **Tomorrow's Priority:** Phase 8 - Quality Refinement (lip-sync, character consistency, transitions, audio, resolution)
+> Note: Phase 7 mosaic workflow is functional. Phase 8 focuses on achieving smooth, lifelike results.
