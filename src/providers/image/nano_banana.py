@@ -5,7 +5,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from ..base import (
     AuthenticationError,
@@ -47,14 +48,14 @@ class NanoBananaProvider(BaseImageProvider):
         self.model = model or self.DEFAULT_MODEL
         self.aspect_ratio = aspect_ratio
 
-        # Configure Google AI
-        genai.configure(api_key=api_key)
+        # Create Google AI client
+        self._client = genai.Client(api_key=api_key)
 
     async def health_check(self) -> bool:
         """Check if Google AI is accessible."""
         try:
             # List available models to verify connectivity
-            models = list(genai.list_models())
+            models = list(self._client.models.list())
             return len(models) > 0
         except Exception as e:
             logger.error(f"Nano Banana health check failed: {e}")
@@ -122,51 +123,40 @@ class NanoBananaProvider(BaseImageProvider):
 
         async def _generate():
             try:
-                # Get the Imagen model
-                imagen = genai.ImageGenerationModel(self.model)
+                # Build generation config using new SDK types
+                config = types.GenerateImagesConfig(
+                    number_of_images=1,
+                    aspect_ratio=aspect,
+                    safety_filter_level="BLOCK_ONLY_HIGH",
+                    person_generation="ALLOW_ADULT",
+                    negative_prompt=negative_prompt,
+                )
 
-                # Build generation config
-                config = {
-                    "number_of_images": 1,
-                    "aspect_ratio": aspect,
-                    "safety_filter_level": "block_only_high",
-                    "person_generation": "allow_adult",
-                }
-
-                # Add negative prompt if provided
-                if negative_prompt:
-                    config["negative_prompt"] = negative_prompt
-
-                # Generate image
-                response = imagen.generate_images(
+                # Generate image using new client API
+                response = self._client.models.generate_images(
+                    model=self.model,
                     prompt=prompt,
-                    **config,
+                    config=config,
                 )
 
                 # Get the first image
-                if not response.images:
+                if not response.generated_images:
                     raise ProviderError("No images generated", self.name)
 
-                image = response.images[0]
+                image = response.generated_images[0]
 
-                # Get image bytes
-                image_bytes = image._pil_image.tobytes() if hasattr(image, '_pil_image') else None
-
-                if image_bytes is None:
-                    # Try to get from base64 if available
-                    if hasattr(image, 'data'):
-                        image_bytes = base64.b64decode(image.data)
-                    elif hasattr(image, '_image_bytes'):
-                        image_bytes = image._image_bytes
-                    else:
-                        # Save to temp file and read back
-                        import io
-                        buffer = io.BytesIO()
-                        image._pil_image.save(buffer, format='PNG')
-                        image_bytes = buffer.getvalue()
+                # Get image bytes from the new SDK format
+                if hasattr(image, 'image') and hasattr(image.image, 'image_bytes'):
+                    image_bytes = image.image.image_bytes
+                elif hasattr(image, 'image_bytes'):
+                    image_bytes = image.image_bytes
+                else:
+                    raise ProviderError("Could not extract image bytes from response", self.name)
 
                 return image_bytes
 
+            except ProviderError:
+                raise
             except Exception as e:
                 self._handle_api_error(e)
 

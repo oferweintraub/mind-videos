@@ -12,7 +12,8 @@ audio:
   provider: elevenlabs
   voice_id: EXAVITQu4vr4xnSDxMaL  # Jessica (Hebrew-capable)
   voice_name: Jessica
-  model_id: eleven_multilingual_v2
+  model_id: eleven_v3  # Latest v3 model with better expressiveness
+  language_code: he  # Hebrew
   stability: 0.5
   similarity_boost: 0.75
 
@@ -25,7 +26,7 @@ video:
   timeout: 300
 
   # Model identifiers
-  veed_model: fal-ai/veed-video
+  veed_model: veed/fabric-1.0
   veed_replicate_model: veed/fabric-1.0
   kling_model: fal-ai/kling-video/v2.5/pro
   kling_replicate_model: klingai/kling-2.5-pro

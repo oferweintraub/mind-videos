@@ -39,7 +39,8 @@ class ElevenLabsProvider(BaseAudioProvider):
         self,
         api_key: str,
         voice_id: str = "EXAVITQu4vr4xnSDxMaL",  # Jessica
-        model_id: str = "eleven_multilingual_v2",
+        model_id: str = "eleven_v3",  # v3 for better quality
+        language_code: str = "he",  # Hebrew
         stability: float = 0.5,
         similarity_boost: float = 0.75,
         retry_config: Optional[RetryConfig] = None,
@@ -53,6 +54,7 @@ class ElevenLabsProvider(BaseAudioProvider):
         )
         self.voice_id = voice_id
         self.model_id = model_id
+        self.language_code = language_code
         self.stability = stability
         self.similarity_boost = similarity_boost
         self._client: Optional[AsyncElevenLabs] = None
@@ -157,11 +159,13 @@ class ElevenLabsProvider(BaseAudioProvider):
                 similarity_boost=self.similarity_boost,
             )
 
-            audio_generator = await self.client.text_to_speech.convert(
+            # convert() returns AsyncIterator directly (not a coroutine)
+            audio_generator = self.client.text_to_speech.convert(
                 voice_id=voice_id,
                 model_id=self.model_id,
                 text=text,
                 voice_settings=voice_settings,
+                language_code=self.language_code,  # Specify Hebrew
             )
 
             # Collect all audio chunks

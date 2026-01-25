@@ -70,6 +70,7 @@ class PipelineOrchestrator:
             api_key=self.config.api_keys.elevenlabs,
             voice_id=self.config.audio.voice_id,
             model_id=self.config.audio.model_id,
+            language_code=self.config.audio.language_code,
             stability=self.config.audio.stability,
             similarity_boost=self.config.audio.similarity_boost,
         )
@@ -222,12 +223,13 @@ class PipelineOrchestrator:
             )
 
             result.video_bytes = video_bytes
-            result.video_duration = video_metadata.get("duration", audio_duration)
+            result.video_duration = video_metadata.get("duration") or audio_duration
             segment.video_path = str(video_path)
             segment.video_duration = result.video_duration
 
+            duration_str = f"{result.video_duration:.2f}s" if result.video_duration else "unknown"
             logger.info(
-                f"Video generated for segment {segment.index}: {result.video_duration:.2f}s"
+                f"Video generated for segment {segment.index}: {duration_str}"
             )
 
         except Exception as e:

@@ -1,6 +1,6 @@
 # LLM Providers
 anthropic>=0.39.0
-google-generativeai>=0.8.0
+google-genai>=1.0.0
 
 # Structured LLM Outputs
 instructor>=1.6.0

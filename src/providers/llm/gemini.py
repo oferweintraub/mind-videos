@@ -3,7 +3,8 @@
 import logging
 from typing import Any, Optional, TypeVar
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import instructor
 
 from ..base import (
@@ -24,10 +25,10 @@ class GeminiProvider(BaseLLMProvider):
     """Gemini LLM provider with structured output support via Instructor.
 
     Drop-in replacement for Claude provider with same interface.
-    Supports Gemini 3 Flash and Pro models.
+    Supports Gemini 2.0 Flash and other models.
     """
 
-    DEFAULT_MODEL = "gemini-3-flash-preview"
+    DEFAULT_MODEL = "gemini-2.0-flash"
     MAX_TOKENS = 4096
 
     def __init__(
@@ -47,23 +48,23 @@ class GeminiProvider(BaseLLMProvider):
         self.model = model or self.DEFAULT_MODEL
         self.max_tokens = max_tokens
 
-        # Configure the Google AI SDK
-        genai.configure(api_key=api_key)
-
-        # Create base Gemini model
-        self._base_model = genai.GenerativeModel(self.model)
+        # Create Google AI client
+        self._client = genai.Client(api_key=api_key)
 
         # Create Instructor-wrapped client for structured outputs
-        self._instructor_client = instructor.from_gemini(
-            client=genai.GenerativeModel(self.model),
-            mode=instructor.Mode.GEMINI_JSON,
+        self._instructor_client = instructor.from_genai(
+            client=self._client,
+            mode=instructor.Mode.GENAI_TOOLS,
         )
 
     async def health_check(self) -> bool:
         """Check if Gemini API is accessible."""
         try:
             # Make a minimal API call to verify connectivity
-            response = self._base_model.generate_content("Hi")
+            response = self._client.models.generate_content(
+                model=self.model,
+                contents="Hi",
+            )
             return response is not None
         except Exception as e:
             logger.error(f"Gemini health check failed: {e}")
@@ -139,8 +140,8 @@ User Request:
         # Build combined prompt
         full_prompt = self._build_prompt_with_system(prompt, system_prompt)
 
-        # Configure generation
-        generation_config = genai.GenerationConfig(
+        # Configure generation using new SDK types
+        generation_config = types.GenerateContentConfig(
             temperature=temperature,
             max_output_tokens=max_tokens,
         )
@@ -148,20 +149,19 @@ User Request:
         try:
             if response_model is not None:
                 # Use Instructor for structured output
-                response = self._instructor_client.messages.create(
+                response = self._instructor_client.chat.completions.create(
+                    model=self.model,
                     messages=[{"role": "user", "content": full_prompt}],
                     response_model=response_model,
-                    generation_config=generation_config,
-                    **kwargs,
                 )
                 return response
 
             else:
-                # Regular text generation
-                response = self._base_model.generate_content(
-                    full_prompt,
-                    generation_config=generation_config,
-                    **kwargs,
+                # Regular text generation using new client API
+                response = self._client.models.generate_content(
+                    model=self.model,
+                    contents=full_prompt,
+                    config=generation_config,
                 )
 
                 # Extract text from response

@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -31,7 +32,7 @@ class VeedFabricFalProvider(ExtendedVideoProvider):
     """
 
     # Fal.ai model identifier for VEED Fabric
-    DEFAULT_MODEL = "fal-ai/veed-tts-avatar"
+    DEFAULT_MODEL = "veed/fabric-1.0"
 
     def __init__(
         self,
@@ -53,23 +54,35 @@ class VeedFabricFalProvider(ExtendedVideoProvider):
             retry_config=retry_config,
             timeout=timeout,
         )
-        # Configure fal_client with API key
+        # Configure fal_client with API key (both methods for compatibility)
+        os.environ["FAL_KEY"] = api_key
         fal_client.api_key = api_key
 
     def _get_resolution_params(self) -> dict:
-        """Get resolution-specific parameters."""
+        """Get resolution-specific parameters for VEED Fabric API."""
+        # VEED Fabric uses "resolution" field with values like "480p", "720p"
         if self.resolution == VideoResolution.RES_480P:
-            return {"width": 854, "height": 480}
+            return {"resolution": "480p"}
         elif self.resolution == VideoResolution.RES_720P:
-            return {"width": 1280, "height": 720}
+            return {"resolution": "720p"}
         elif self.resolution == VideoResolution.RES_1080P:
-            return {"width": 1920, "height": 1080}
-        return {"width": 854, "height": 480}
+            return {"resolution": "1080p"}
+        return {"resolution": "480p"}
 
-    def _encode_media(self, data: bytes, media_type: str) -> str:
-        """Encode bytes as data URI."""
-        b64_data = base64.b64encode(data).decode("utf-8")
-        return f"data:{media_type};base64,{b64_data}"
+    async def _upload_media(self, data: bytes, media_type: str) -> str:
+        """Upload media to Fal.ai and return the URL."""
+        # Determine file extension from media type
+        ext_map = {
+            "image/png": "png",
+            "image/jpeg": "jpg",
+            "audio/mpeg": "mp3",
+            "audio/mp3": "mp3",
+        }
+        ext = ext_map.get(media_type, "bin")
+
+        # Upload using fal_client
+        url = await fal_client.upload_async(data, content_type=media_type)
+        return url
 
     def _handle_api_error(self, error: Exception) -> None:
         """Convert Fal.ai errors to provider errors."""
@@ -110,18 +123,18 @@ class VeedFabricFalProvider(ExtendedVideoProvider):
     ) -> str:
         """Submit a video generation job to Fal.ai."""
         try:
-            # Encode image as data URI
-            image_uri = self._encode_media(image, "image/png")
+            # Upload image to Fal.ai CDN
+            image_url = await self._upload_media(image, "image/jpeg")
 
             # Build request payload
             payload = {
-                "image_url": image_uri,
+                "image_url": image_url,
             }
 
             # Add audio if provided (for lip-sync)
             if audio is not None:
-                audio_uri = self._encode_media(audio, "audio/mpeg")
-                payload["audio_url"] = audio_uri
+                audio_url = await self._upload_media(audio, "audio/mpeg")
+                payload["audio_url"] = audio_url
 
             # Add optional parameters
             resolution_params = self._get_resolution_params()
@@ -150,8 +163,8 @@ class VeedFabricFalProvider(ExtendedVideoProvider):
                 with_logs=True,
             )
 
-            # Map Fal.ai status to our status enum
-            if status.status == "COMPLETED":
+            # New fal_client API returns type instances (Completed, InProgress, Queued)
+            if isinstance(status, fal_client.Completed):
                 # Get the result
                 result = await fal_client.result_async(self.model_id, job_id)
 
@@ -178,21 +191,20 @@ class VeedFabricFalProvider(ExtendedVideoProvider):
                     metadata={"raw_result": result if isinstance(result, dict) else {}},
                 )
 
-            elif status.status == "FAILED":
-                error_msg = getattr(status, "error", "Unknown error")
+            elif hasattr(status, "error") and status.error:
                 return VideoJobResult(
                     job_id=job_id,
                     status=VideoStatus.FAILED,
-                    error_message=str(error_msg),
+                    error_message=str(status.error),
                 )
 
-            elif status.status == "IN_QUEUE":
+            elif isinstance(status, fal_client.Queued):
                 return VideoJobResult(
                     job_id=job_id,
                     status=VideoStatus.PENDING,
                 )
 
-            else:  # IN_PROGRESS or other
+            else:  # InProgress or other
                 return VideoJobResult(
                     job_id=job_id,
                     status=VideoStatus.PROCESSING,

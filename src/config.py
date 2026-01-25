@@ -50,7 +50,8 @@ class AudioConfig(BaseModel):
     provider: str = Field(default="elevenlabs", description="Audio provider")
     voice_id: str = Field(default="EXAVITQu4vr4xnSDxMaL", description="ElevenLabs voice ID")
     voice_name: str = Field(default="Jessica", description="Voice name for reference")
-    model_id: str = Field(default="eleven_multilingual_v2", description="ElevenLabs model")
+    model_id: str = Field(default="eleven_v3", description="ElevenLabs model (eleven_v3 recommended)")
+    language_code: str = Field(default="he", description="Language code (he for Hebrew)")
     stability: float = Field(default=0.5, description="Voice stability (0-1)")
     similarity_boost: float = Field(default=0.75, description="Voice similarity boost (0-1)")
 
@@ -66,7 +67,7 @@ class VideoConfig(BaseModel):
     timeout: int = Field(default=300, description="Timeout in seconds")
 
     # VEED Fabric settings
-    veed_model: str = Field(default="fal-ai/veed-video", description="VEED model ID on Fal.ai")
+    veed_model: str = Field(default="veed/fabric-1.0", description="VEED model ID on Fal.ai")
     veed_replicate_model: str = Field(
         default="veed/fabric-1.0",
         description="VEED model ID on Replicate"
