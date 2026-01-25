@@ -1,0 +1,75 @@
+# Content Brief: October 7 Investigation
+# This brief demonstrates how to steer the LLM with detailed guidelines
+
+title: "חקירת אסון ה-7 באוקטובר"
+subtitle: "הממשלה חוקרת את עצמה?"
+
+# THE HEART OF THE BRIEF - key arguments in order of importance
+key_points:
+  - "הממשלה הישראלית רוצה לחקור את אסון 7 באוקטובר בעצמה"
+  - "אתם שומעים נכון - הפוגע לכאורה רוצה לחקור את עצמו"
+  - "האם הייתם נותנים לרוצח לשפוט את עצמו ולגזור את עונשו?"
+  - "האם הייתם ישנים בשקט במערכת כזו?"
+  - "ישראל חייבת ועדת חקירה ממלכתית"
+
+# Powerful questions to ask the audience
+rhetorical_questions:
+  - "מי יכול לסמוך על הנחקר שיחקור את עצמו?"
+  - "האם זה מה שציפינו ממנהיגים?"
+  - "איך נראה צדק אמיתי?"
+
+# Phrases that MUST appear in the script
+must_include_phrases:
+  - "ועדת חקירה ממלכתית"
+  - "אחריות ציבורית"
+  - "דמוקרטיה תקינה"
+
+# What should the viewer feel/think/do after watching
+call_to_action: >
+  דרשו מחברי הכנסת שלכם לתמוך בהקמת ועדת חקירה ממלכתית עצמאית.
+  זו לא שאלה פוליטית - זו שאלה של צדק, אמת ואחריות.
+  עתיד הדמוקרטיה הישראלית תלוי בזה.
+
+# Facts and examples to reference
+supporting_facts:
+  - "ועדות חקירה ממלכתיות בעבר חשפו כשלים קריטיים"
+  - "ועדת אגרנט, ועדת וינוגרד - תקדימים חשובים"
+  - "חקירה פנימית מעולם לא הובילה לאחריותיות אמיתית"
+
+# Primary emotional tone
+emotional_tone: "cynical"
+
+# Secondary emotional tones to weave in
+secondary_tones:
+  - "defiant"
+  - "urgent"
+
+# Rhetorical devices to employ
+rhetorical_devices:
+  - "rhetorical_questions"
+  - "contrast"
+  - "analogies"
+  - "call_to_action"
+
+# Who is this video for?
+target_audience: "אזרחים ישראלים שמאמינים בדמוקרטיה ושלטון החוק"
+
+# Background context for the LLM
+context: >
+  לאחר אסון 7 באוקטובר, הממשלה הישראלית מסרבת להקים ועדת חקירה
+  ממלכתית עצמאית. במקום זאת, היא מציעה חקירות פנימיות שבהן
+  הנחקרים למעשה חוקרים את עצמם. ההיסטוריה מלמדת שרק ועדות
+  חקירה ממלכתיות עצמאיות מסוגלות לחשוף את האמת ולגרום לשינוי.
+
+# Topics/phrases to avoid
+avoid:
+  - "האשמות אישיות ישירות ללא הוכחות"
+  - "קריאות לאלימות"
+  - "הסתה"
+  - "השוואות לשואה"
+
+# Suggested opening hook
+opening_hook: "תארו לעצמכם: הנאשם מבקש לשפוט את עצמו. נשמע מופרך? זה בדיוק מה שקורה כאן."
+
+# Suggested closing statement
+closing_statement: "דמוקרטיה אמיתית דורשת אחריותיות אמיתית. הגיע הזמן לעמוד על שלנו."

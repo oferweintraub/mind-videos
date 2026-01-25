@@ -210,6 +210,7 @@ User Request:
         topic: str,
         angle: str,
         target_duration: float = 60.0,
+        prompt_context: Optional[str] = None,
     ) -> Any:
         """Generate script options for A/B testing.
 
@@ -217,6 +218,7 @@ User Request:
             topic: Topic for the video
             angle: Angle/guidelines for the script
             target_duration: Target duration in seconds
+            prompt_context: Optional detailed prompt context from ContentBrief
 
         Returns:
             ScriptOptions object with 3 options
@@ -235,7 +237,32 @@ Your scripts should:
 
 Generate 3 distinct script options (A, B, C) with different approaches to the topic."""
 
-        prompt = f"""Create 3 script options for a Hebrew educational video.
+        # Use detailed brief context if provided
+        if prompt_context:
+            prompt = f"""Create 3 script options for a Hebrew educational video based on the following detailed brief.
+
+{prompt_context}
+
+Target Duration: {target_duration} seconds
+
+IMPORTANT INSTRUCTIONS:
+- Follow the key points in the order given - they are your roadmap
+- Use the specified emotional tone throughout
+- Incorporate the rhetorical devices listed
+- Include the must-have phrases where natural
+- Weave in the rhetorical questions
+- End with the call to action
+
+Each option should:
+- Cover ALL key points in the brief
+- Use a slightly different narrative approach
+- Have a compelling hook that draws viewers in
+- Match the specified emotional tone
+
+Please generate exactly 3 options labeled A, B, and C."""
+        else:
+            # Simple mode - topic and angle only
+            prompt = f"""Create 3 script options for a Hebrew educational video.
 
 Topic: {topic}
 Angle/Guidelines: {angle}

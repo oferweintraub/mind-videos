@@ -70,10 +70,14 @@ class ScriptGenerator:
 
         logger.info(f"Generating script options for topic: {request.topic}")
 
+        # Use detailed prompt context if brief is available
+        prompt_context = request.get_prompt_context() if request.has_detailed_brief() else None
+
         options = await llm.generate_script_options(
             topic=request.topic,
             angle=request.angle,
             target_duration=request.target_duration,
+            prompt_context=prompt_context,
         )
 
         logger.info(f"Generated {len(options.options)} script options")

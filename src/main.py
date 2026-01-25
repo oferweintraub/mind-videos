@@ -125,13 +125,18 @@ def test(
 @cli.command()
 @click.option(
     "--topic", "-t",
-    required=True,
-    help="Topic for the video"
+    default=None,
+    help="Topic for the video (not needed if using --brief)"
 )
 @click.option(
     "--angle", "-a",
-    default="empathetic, solution-focused",
-    help="Angle/guidelines for the video"
+    default=None,
+    help="Angle/guidelines for the video (not needed if using --brief)"
+)
+@click.option(
+    "--brief", "-b",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to content brief file (YAML or Markdown)"
 )
 @click.option(
     "--image", "-i",
@@ -163,22 +168,29 @@ def test(
 @click.pass_context
 def generate(
     ctx: click.Context,
-    topic: str,
-    angle: str,
+    topic: Optional[str],
+    angle: Optional[str],
+    brief: Optional[Path],
     image: Optional[Path],
     workflow: str,
     preview: bool,
     output: Optional[Path],
     llm: Optional[str],
 ) -> None:
-    """Generate a full video from topic.
+    """Generate a full video from topic or content brief.
 
-    Example:
+    You can use either simple mode (--topic and --angle) or detailed mode (--brief).
+
+    Simple mode example:
         python -m src.main generate \\
             --topic "government accountability" \\
             --angle "empathetic, solution-focused" \\
-            --image ./ref.png \\
-            --workflow 1
+            --image ./ref.png
+
+    Detailed mode example (recommended):
+        python -m src.main generate \\
+            --brief ./briefs/october7_investigation.yaml \\
+            --image ./ref.png
 
     Workflow 1 (Image-based, ~$4.50):
         Uses VEED Fabric for direct image+audio to video with lip-sync.
@@ -188,6 +200,29 @@ def generate(
         Uses Kling for image+motion to video, then sync for lip-sync.
         Higher quality motion, better for dynamic content.
     """
+    from .schemas import ContentBrief, ScriptRequest
+
+    # Validate input mode
+    if brief is None and (topic is None or angle is None):
+        console.print("[bold red]Error:[/bold red] Must provide either --brief OR both --topic and --angle")
+        sys.exit(1)
+
+    # Load brief if provided
+    content_brief = None
+    if brief:
+        try:
+            if brief.suffix in (".yaml", ".yml"):
+                content_brief = ContentBrief.from_yaml(brief)
+            elif brief.suffix == ".md":
+                content_brief = ContentBrief.from_markdown(brief)
+            else:
+                console.print(f"[bold red]Error:[/bold red] Unsupported brief format: {brief.suffix}")
+                sys.exit(1)
+            topic = content_brief.title
+            angle = f"{content_brief.emotional_tone}, {', '.join(content_brief.rhetorical_devices)}"
+        except Exception as e:
+            console.print(f"[bold red]Error loading brief:[/bold red] {e}")
+            sys.exit(1)
     from .pipeline import Workflow1Pipeline, Workflow2Pipeline
 
     # Update config if LLM override specified
@@ -197,12 +232,17 @@ def generate(
 
     workflow_name = "Image-based (VEED Fabric)" if workflow == "1" else "Video-based (Kling + Sync)"
     estimated_cost = "~$1.50" if preview else ("~$4.50" if workflow == "1" else "~$6.00")
+    mode = "Detailed Brief" if content_brief else "Simple"
+    key_points_preview = ""
+    if content_brief and content_brief.key_points:
+        key_points_preview = f"\nKey Points: {len(content_brief.key_points)} defined"
 
     console.print(
         Panel.fit(
             f"[bold blue]Generating Video[/bold blue]\n\n"
+            f"Mode: {mode}\n"
             f"Topic: {topic}\n"
-            f"Angle: {angle}\n"
+            f"Angle: {angle}{key_points_preview}\n"
             f"Workflow: {workflow_name}\n"
             f"Preview: {preview}\n"
             f"Est. Cost: {estimated_cost}",
@@ -220,6 +260,7 @@ def generate(
             final_path = await pipeline.run(
                 topic=topic,
                 angle=angle,
+                brief=content_brief,
                 output_dir=output,
                 preview=preview,
                 reference_image=image,

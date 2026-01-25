@@ -14,6 +14,7 @@ from ..providers.video import VideoResolution
 from ..providers.video.fal import VeedFabricFalProvider
 from ..providers.video.replicate import VeedFabricReplicateProvider
 from ..schemas import (
+    ContentBrief,
     ImagePromptBatch,
     Script,
     ScriptRequest,
@@ -456,8 +457,9 @@ class Workflow1Pipeline:
 
     async def run(
         self,
-        topic: str,
-        angle: str,
+        topic: Optional[str] = None,
+        angle: Optional[str] = None,
+        brief: Optional[ContentBrief] = None,
         output_dir: Optional[Path] = None,
         preview: bool = False,
         reference_image: Optional[Path] = None,
@@ -465,8 +467,9 @@ class Workflow1Pipeline:
         """Run the complete Workflow 1 pipeline.
 
         Args:
-            topic: Video topic
-            angle: Video angle/guidelines
+            topic: Video topic (not needed if brief provided)
+            angle: Video angle/guidelines (not needed if brief provided)
+            brief: Detailed content brief (recommended for quality output)
             output_dir: Output directory (auto-generated if not specified)
             preview: Generate preview (fewer segments)
             reference_image: Optional reference image path
@@ -475,6 +478,15 @@ class Workflow1Pipeline:
             Path to final video
         """
         await self.initialize()
+
+        # Validate input
+        if brief is None and (topic is None or angle is None):
+            raise ValueError("Must provide either (topic + angle) or brief")
+
+        # Derive topic/angle from brief if not provided
+        if brief:
+            topic = topic or brief.title
+            angle = angle or f"{brief.emotional_tone}, {', '.join(brief.rhetorical_devices)}"
 
         # Setup output directory
         if output_dir is None:
@@ -488,6 +500,8 @@ class Workflow1Pipeline:
         # Initialize metadata tracker
         metadata = MetadataTracker(output_dir)
         metadata.set_topic(topic, angle)
+        if brief:
+            metadata._metadata["brief"] = brief.model_dump(exclude_none=True)
 
         try:
             # Step 1: Generate script
@@ -495,6 +509,7 @@ class Workflow1Pipeline:
             request = ScriptRequest(
                 topic=topic,
                 angle=angle,
+                brief=brief,
                 target_duration=60.0,
                 min_segments=self.config.pipeline.preview_segments if preview else self.config.pipeline.segments_min,
                 max_segments=self.config.pipeline.preview_segments if preview else self.config.pipeline.segments_max,

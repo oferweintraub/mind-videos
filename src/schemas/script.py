@@ -2,10 +2,12 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from .brief import ContentBrief
 from .segment import Segment, SegmentList
 
 
@@ -130,18 +132,34 @@ class Script(BaseModel):
 
 
 class ScriptRequest(BaseModel):
-    """Request to generate a script."""
+    """Request to generate a script.
 
-    topic: str = Field(
+    Supports two modes:
+    1. Simple: topic + angle (short strings)
+    2. Detailed: ContentBrief (structured brief with key points, rhetorical devices, etc.)
+
+    When a brief is provided, topic and angle are derived from it.
+    """
+
+    # Simple mode fields (can be derived from brief)
+    topic: Optional[str] = Field(
+        default=None,
         description="Topic for the video (e.g., 'government accountability')",
-        min_length=3,
         max_length=200
     )
-    angle: str = Field(
+    angle: Optional[str] = Field(
+        default=None,
         description="Angle/guidelines (e.g., 'empathetic, solution-focused')",
-        min_length=3,
         max_length=300
     )
+
+    # Detailed mode field
+    brief: Optional[ContentBrief] = Field(
+        default=None,
+        description="Detailed content brief with key points and rhetorical direction"
+    )
+
+    # Common fields
     target_duration: float = Field(
         default=60.0,
         description="Target duration in seconds",
@@ -160,3 +178,44 @@ class ScriptRequest(BaseModel):
         default=None,
         description="Path to reference image for character"
     )
+
+    @model_validator(mode="after")
+    def validate_input_mode(self):
+        """Ensure either topic/angle or brief is provided."""
+        has_simple = self.topic is not None and self.angle is not None
+        has_brief = self.brief is not None
+
+        if not has_simple and not has_brief:
+            raise ValueError("Must provide either (topic + angle) or brief")
+
+        # If brief provided, derive topic/angle from it
+        if has_brief and not has_simple:
+            self.topic = self.brief.title
+            self.angle = f"{self.brief.emotional_tone}, {', '.join(self.brief.rhetorical_devices)}"
+
+        return self
+
+    @classmethod
+    def from_brief_file(cls, path: Path, **kwargs) -> "ScriptRequest":
+        """Create request from a brief file (YAML or Markdown)."""
+        if path.suffix in (".yaml", ".yml"):
+            brief = ContentBrief.from_yaml(path)
+        elif path.suffix == ".md":
+            brief = ContentBrief.from_markdown(path)
+        else:
+            raise ValueError(f"Unsupported brief format: {path.suffix}")
+
+        return cls(brief=brief, **kwargs)
+
+    def get_prompt_context(self) -> str:
+        """Get the full prompt context for the LLM.
+
+        Returns detailed brief context if available, otherwise simple topic/angle.
+        """
+        if self.brief:
+            return self.brief.to_prompt_context()
+        return f"נושא: {self.topic}\nכיוון: {self.angle}"
+
+    def has_detailed_brief(self) -> bool:
+        """Check if using detailed brief mode."""
+        return self.brief is not None

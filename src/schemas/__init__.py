@@ -1,5 +1,11 @@
 """Pydantic schemas for the Hebrew Democracy Video Pipeline."""
 
+from .brief import (
+    ContentBrief,
+    EmotionalTone,
+    RhetoricalDevice,
+    create_brief,
+)
 from .scene import (
     CharacterDescription,
     ImagePrompt,
@@ -33,6 +39,11 @@ from .validation import (
 )
 
 __all__ = [
+    # Brief
+    "ContentBrief",
+    "EmotionalTone",
+    "RhetoricalDevice",
+    "create_brief",
     # Segment
     "CameraAngle",
     "Expression",
