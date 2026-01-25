@@ -157,6 +157,47 @@
 
 ---
 
+## Phase 5: Content Brief System ✅
+
+### 5.1 ContentBrief Schema
+- [x] **5.1.1** `schemas/brief.py` - ContentBrief Pydantic model
+- [x] **5.1.2** EmotionalTone enum (angry, hopeful, cynical, etc.)
+- [x] **5.1.3** RhetoricalDevice enum (metaphors, rhetorical_questions, etc.)
+- [x] **5.1.4** Key points, rhetorical questions, must-include phrases
+- [x] **5.1.5** `to_prompt_context()` - Convert brief to Hebrew LLM prompt
+- [x] **5.1.6** `from_yaml()` and `from_markdown()` - File loading
+
+### 5.2 ScriptRequest Integration
+- [x] **5.2.1** Update ScriptRequest to accept optional ContentBrief
+- [x] **5.2.2** `get_prompt_context()` - Return detailed or simple context
+- [x] **5.2.3** `from_brief_file()` - Factory method for file loading
+- [x] **5.2.4** Validation: require either (topic+angle) or brief
+
+### 5.3 Pipeline Integration
+- [x] **5.3.1** Update Workflow1Pipeline.run() to accept brief
+- [x] **5.3.2** Update Workflow2Pipeline.run() to accept brief
+- [x] **5.3.3** Store brief in metadata for tracking
+- [x] **5.3.4** Pass prompt_context to script generator
+
+### 5.4 LLM Provider Updates
+- [x] **5.4.1** Update Claude generate_script_options() for prompt_context
+- [x] **5.4.2** Update Gemini generate_script_options() for prompt_context
+- [x] **5.4.3** Enhanced prompts: follow key points, use tone, incorporate devices
+
+### 5.5 CLI Updates
+- [x] **5.5.1** Add `--brief` / `-b` option to generate command
+- [x] **5.5.2** Support YAML and Markdown brief formats
+- [x] **5.5.3** Display mode (Detailed Brief vs Simple) in output
+- [x] **5.5.4** Make topic/angle optional when brief provided
+
+### 5.6 Sample Briefs
+- [x] **5.6.1** `briefs/october7_investigation.yaml` - Example brief
+- [x] **5.6.2** `briefs/example_template.md` - Markdown template
+- [ ] **5.6.3** Additional sample briefs for different topics
+- [ ] **5.6.4** Brief validation tests
+
+---
+
 ## Testing Checklist (Per Task)
 
 Before marking any task DONE:
@@ -178,6 +219,7 @@ Before marking any task DONE:
 | Phase 2: LLM | 16 | 10 | 63% |
 | Phase 3: Full Pipeline | 20 | 14 | 70% |
 | Phase 4: Workflow 2 | 16 | 12 | 75% |
-| **Total** | **73** | **53** | **73%** |
+| Phase 5: Content Brief | 20 | 18 | 90% |
+| **Total** | **93** | **71** | **76%** |
 
 > Note: Remaining tasks are primarily unit/integration tests that require API keys to run.
