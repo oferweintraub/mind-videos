@@ -10,7 +10,7 @@ Automated pipeline for generating 1-minute Hebrew educational videos promoting d
 |-----------|----------|-------------|----------|
 | LLM | Claude 4.5 Sonnet | Anthropic | Gemini 3.0 Flash |
 | Images | Nano Banana Pro | Google AI (Imagen 3) | - |
-| Audio/TTS | ElevenLabs V2 | ElevenLabs | - |
+| Audio/TTS | ElevenLabs V3 | ElevenLabs (he) | - |
 | Video (Workflow 1) | VEED Fabric | Fal.ai | Replicate |
 | Video (Workflow 2) | Kling 2.5 + Sync | Fal.ai | Replicate |
 
@@ -71,6 +71,26 @@ python -m src.main health
 - Uses Kling for image → video with motion
 - Then Sync for adding lip-sync
 - Higher quality motion, better for dynamic content
+
+## Image Generation Strategy
+
+To avoid Nano Banana rate limits and improve character consistency:
+
+**Mosaic Approach**
+1. Generate a 2x3 mosaic with 6 character variations in one API call
+2. Split into 6 individual images using PIL (no API calls)
+3. User selects best 3 images
+4. Apply reuse pattern `[1, 1, 2, 2, 3]` across 5 segments
+
+**Variations in Mosaic:**
+- Sofa, kitchen, balcony, standing, close-up, side angle
+- Same character, different settings/poses
+
+**Benefits:**
+- 1 API call instead of 5-8
+- Better character consistency
+- User control over image selection
+- Cost: ~$0.02 vs ~$0.10
 
 ## Content Briefs
 

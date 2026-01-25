@@ -25,11 +25,16 @@ logger = logging.getLogger(__name__)
 class NanoBananaProvider(BaseImageProvider):
     """Nano Banana Pro image generation via Google AI.
 
-    Uses Imagen 3 for high-quality character image generation
-    with consistency features for reference images.
+    Uses Nano Banana Pro (Gemini 3 Pro Image) for high-quality character
+    image generation with reference image support for consistency.
+
+    Supports two modes:
+    - generate_image: Basic text-to-image using Imagen 4.0
+    - generate_mosaic: Reference-based mosaic using Nano Banana Pro
     """
 
-    DEFAULT_MODEL = "imagen-3.0-generate-002"
+    DEFAULT_MODEL = "imagen-4.0-generate-001"
+    NANO_BANANA_MODEL = "nano-banana-pro-preview"
 
     def __init__(
         self,
@@ -124,12 +129,13 @@ class NanoBananaProvider(BaseImageProvider):
         async def _generate():
             try:
                 # Build generation config using new SDK types
+                # Note: negative_prompt is not supported in the current Gemini API
+                # Imagen 4.0 only supports "block_low_and_above" for safety filter
                 config = types.GenerateImagesConfig(
                     number_of_images=1,
                     aspect_ratio=aspect,
-                    safety_filter_level="BLOCK_ONLY_HIGH",
-                    person_generation="ALLOW_ADULT",
-                    negative_prompt=negative_prompt,
+                    safety_filter_level="block_low_and_above",
+                    person_generation="allow_adult",
                 )
 
                 # Generate image using new client API
@@ -335,3 +341,146 @@ class NanoBananaProvider(BaseImageProvider):
                 results.append((None, {"error": str(item.error), "index": item.index}))
 
         return results
+
+    async def generate_mosaic(
+        self,
+        reference_image: Optional[bytes] = None,
+        reference_image_path: Optional[Path] = None,
+        character_description: Optional[str] = None,
+        settings: Optional[list[str]] = None,
+        output_path: Optional[Path] = None,
+        **kwargs,
+    ) -> tuple[bytes, dict]:
+        """Generate a 2x3 mosaic with 6 character variations using Nano Banana Pro.
+
+        This method uses Nano Banana Pro (Gemini 3 Pro Image) which supports
+        reference images for character consistency. It generates a single image
+        containing 6 variations of the same character in different settings/poses.
+
+        Args:
+            reference_image: Reference image bytes for character consistency
+            reference_image_path: Path to reference image (alternative to bytes)
+            character_description: Optional text description (used if no reference)
+            settings: List of 6 settings/poses for the grid (optional, uses defaults)
+            output_path: Optional path to save the mosaic image
+            **kwargs: Additional parameters
+
+        Returns:
+            Tuple of (mosaic_bytes, metadata_dict)
+        """
+        # Load reference image if path provided
+        if reference_image_path and not reference_image:
+            if not reference_image_path.exists():
+                raise ProviderError(
+                    f"Reference image not found: {reference_image_path}",
+                    self.name,
+                    recoverable=False,
+                )
+            reference_image = reference_image_path.read_bytes()
+
+        # Default settings for the 6 grid cells
+        default_settings = [
+            "sitting on a comfortable sofa in a living room",
+            "standing in a modern kitchen",
+            "on a sunny balcony with city view",
+            "standing confidently with arms crossed",
+            "close-up portrait shot",
+            "side profile angle",
+        ]
+        settings = settings or default_settings
+
+        if len(settings) != 6:
+            raise ProviderError(
+                f"Mosaic requires exactly 6 settings, got {len(settings)}",
+                self.name,
+                recoverable=False,
+            )
+
+        # Build the mosaic prompt
+        settings_text = ", ".join([f"({i+1}) {s}" for i, s in enumerate(settings)])
+
+        if reference_image:
+            # Use Nano Banana Pro with reference image
+            mosaic_prompt = (
+                f"Create a 2x3 grid showing this SAME woman in 6 different settings: "
+                f"{settings_text}. "
+                f"Maintain the exact same face, hair color, and features in all 6 images. "
+                f"Professional photography quality, good lighting in each scene."
+            )
+
+            async def _generate_with_reference():
+                try:
+                    response = self._client.models.generate_content(
+                        model=self.NANO_BANANA_MODEL,
+                        contents=[
+                            types.Part.from_bytes(data=reference_image, mime_type='image/png'),
+                            mosaic_prompt,
+                        ],
+                        config=types.GenerateContentConfig(
+                            response_modalities=['image', 'text'],
+                        )
+                    )
+
+                    # Extract generated image from response
+                    if response.candidates:
+                        for candidate in response.candidates:
+                            if candidate.content and candidate.content.parts:
+                                for part in candidate.content.parts:
+                                    if hasattr(part, 'inline_data') and part.inline_data:
+                                        return part.inline_data.data
+
+                    raise ProviderError("No image generated in response", self.name)
+
+                except ProviderError:
+                    raise
+                except Exception as e:
+                    self._handle_api_error(e)
+
+            result = await self._retry_operation(_generate_with_reference, "generate_mosaic")
+
+            if not result.success:
+                raise result.error or ProviderError("Mosaic generation failed", self.name)
+
+            image_bytes = result.data
+
+        else:
+            # Fallback to Imagen without reference image
+            if not character_description:
+                raise ProviderError(
+                    "Either reference_image or character_description required",
+                    self.name,
+                    recoverable=False,
+                )
+
+            mosaic_prompt = (
+                f"Create a 2x3 grid image showing the SAME person in 6 different scenes. "
+                f"The person: {character_description}. "
+                f"The 6 scenes arranged in 2 rows of 3: {settings_text}. "
+                f"Each cell shows the same person with consistent appearance, face, and features. "
+                f"Professional photography quality, good lighting in each scene. "
+                f"Clean grid layout with subtle borders between cells."
+            )
+
+            image_bytes, _ = await self.generate_image(
+                prompt=mosaic_prompt,
+                aspect_ratio="3:4",
+                output_path=None,  # We'll save below
+                **kwargs,
+            )
+
+        # Save to file if path provided
+        if output_path:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(image_bytes)
+            logger.info(f"Mosaic saved to {output_path}")
+
+        metadata = {
+            "model": self.NANO_BANANA_MODEL if reference_image else self.model,
+            "mosaic": True,
+            "grid_size": "2x3",
+            "settings": settings,
+            "has_reference": reference_image is not None,
+            "provider": self.name,
+        }
+
+        return image_bytes, metadata

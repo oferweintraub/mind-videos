@@ -235,6 +235,42 @@
 
 ---
 
+## Phase 7: Mosaic Image Generation 🚧
+
+### 7.1 Mosaic Generation
+- [ ] **7.1.1** Update `NanoBananaProvider` to support mosaic prompts
+- [ ] **7.1.2** Add `generate_mosaic()` method for 2x3 grid generation
+- [ ] **7.1.3** Prompt template: "2x3 grid of same character in 6 settings: sofa, kitchen, balcony, standing, close-up, side angle"
+- [ ] **7.1.4** Test mosaic quality and character consistency
+
+### 7.2 Mosaic Splitting
+- [ ] **7.2.1** `utils/image_utils.py` - PIL-based mosaic splitter
+- [ ] **7.2.2** `split_mosaic()` - Split 2x3 grid into 6 images
+- [ ] **7.2.3** Auto-detect grid dimensions from image size
+- [ ] **7.2.4** Save individual images with consistent naming
+- [ ] **7.2.5** Write unit tests
+
+### 7.3 Image Selection
+- [ ] **7.3.1** Interactive selection mode (CLI with image preview)
+- [ ] **7.3.2** Config-based selection (specify indices in config)
+- [ ] **7.3.3** Auto-select mode (first 3 by default)
+- [ ] **7.3.4** `ImageSelector` class with selection modes
+
+### 7.4 Segment-Image Assignment
+- [ ] **7.4.1** `SegmentImageMapper` - Apply reuse pattern
+- [ ] **7.4.2** Default pattern: `[1, 1, 2, 2, 3]` for 5 segments
+- [ ] **7.4.3** Configurable patterns for different segment counts
+- [ ] **7.4.4** Pattern validation (enough images for pattern)
+
+### 7.5 Pipeline Integration
+- [ ] **7.5.1** Update `Workflow1Pipeline` for mosaic mode
+- [ ] **7.5.2** Add `--mosaic` CLI flag
+- [ ] **7.5.3** Add `--pattern` CLI flag for custom patterns
+- [ ] **7.5.4** Metadata tracking for image reuse pattern
+- [ ] **7.5.5** End-to-end test: mosaic → split → select → generate → concatenate
+
+---
+
 ## Testing Checklist (Per Task)
 
 Before marking any task DONE:
@@ -258,6 +294,7 @@ Before marking any task DONE:
 | Phase 4: Workflow 2 | 16 | 12 | 75% |
 | Phase 5: Content Brief | 20 | 18 | 90% |
 | Phase 6: Error Handling | 19 | 17 | 89% |
-| **Total** | **112** | **88** | **79%** |
+| Phase 7: Mosaic Images | 17 | 0 | 0% |
+| **Total** | **129** | **88** | **68%** |
 
-> Note: Remaining tasks are primarily unit/integration tests that require API keys to run.
+> Note: Remaining tasks are primarily unit/integration tests that require API keys to run. Phase 7 is the new mosaic-based image generation workflow.

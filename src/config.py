@@ -92,7 +92,7 @@ class ImageConfig(BaseModel):
     """Image generation configuration."""
 
     provider: str = Field(default="nano_banana", description="Image provider")
-    model: str = Field(default="imagen-3.0-generate-002", description="Nano Banana model")
+    model: str = Field(default="imagen-4.0-generate-001", description="Nano Banana model")
     aspect_ratio: str = Field(default="9:16", description="Image aspect ratio")
     number_of_images: int = Field(default=1, description="Images to generate per prompt")
 

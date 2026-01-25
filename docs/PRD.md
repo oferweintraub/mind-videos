@@ -11,7 +11,7 @@ Generate automated 1-minute Hebrew educational videos promoting democracy, accou
 |-----------|------|-------------|----------|
 | **Images** | Nano Banana Pro | Google AI | - |
 | **LLM** | Claude Sonnet 4.5 | Anthropic | Gemini 3.0 |
-| **Audio** | ElevenLabs V2 | ElevenLabs Direct | - |
+| **Audio** | ElevenLabs V3 | ElevenLabs Direct (he) | - |
 | **Image→Video+Lipsync** | VEED Fabric 1.0 | **Fal.ai** | Replicate |
 | **Image→Video** | Kling 2.5 Pro | **Fal.ai** | Replicate |
 | **Video→Video+Lipsync** | sync/lipsync-2-pro | **Fal.ai** | Replicate |
@@ -55,6 +55,44 @@ Same as Workflow 1 until audio generation, then:
                 ↓
     Continue with validation, subtitles, concatenation
 ```
+
+---
+
+## Image Generation Strategy
+
+### Challenge
+API rate limits on Nano Banana Pro (Google Imagen 3) restrict individual image generation calls. Generating 6-8 unique images per video hits these limits.
+
+### Solution: Mosaic + Reuse Pattern
+
+**Step 1: Generate 2x3 Mosaic**
+Generate a single 2x3 mosaic image containing 6 character variations in one API call:
+- Same character in different settings/poses
+- Variations: sofa, kitchen, balcony, standing, close-up, side angle
+- Prompt includes "2x3 grid" instruction for consistent layout
+
+**Step 2: Split into Individual Images**
+Use PIL/ImageMagick to split the mosaic into 6 separate images programmatically (no API calls).
+
+**Step 3: User Selection**
+Present 6 images to user for selection of best 3 (interactive or config-based).
+
+**Step 4: Segment Reuse Pattern**
+For 5 segments, use pattern `[1, 1, 2, 2, 3]`:
+- Segments 1-2: Image 1 (intro/context)
+- Segments 3-4: Image 2 (middle content)
+- Segment 5: Image 3 (conclusion/CTA)
+
+This provides visual variety while maintaining character consistency.
+
+### Benefits
+| Aspect | Before (Individual) | After (Mosaic) |
+|--------|---------------------|----------------|
+| API calls for 5 segments | 5 | 1 |
+| Rate limit issues | Frequent | Rare |
+| Character consistency | Variable | High (same prompt) |
+| User control | None | Select best 3 from 6 |
+| Cost | ~$0.10 | ~$0.02 |
 
 ---
 

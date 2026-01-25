@@ -35,7 +35,7 @@ video:
 
 image:
   provider: nano_banana
-  model: imagen-3.0-generate-002
+  model: imagen-4.0-generate-001
   aspect_ratio: "9:16"
   number_of_images: 1
 
