@@ -29,8 +29,8 @@ HEBREW_VOICES = {
 }
 
 # Emotion presets: (stability, style, description)
-# Lower stability = more expressive variation
-# Higher style = more emotional intensity
+# Stability: 0.0 = Creative (most expressive), 0.5 = Natural, 1.0 = Robust (most stable)
+# Style: 0.0-1.0, higher = more emotional intensity
 EMOTION_PRESETS = {
     "neutral": {
         "stability": 0.5,
@@ -38,12 +38,12 @@ EMOTION_PRESETS = {
         "description": "Calm, neutral delivery",
     },
     "angry": {
-        "stability": 0.3,
-        "style": 0.8,
+        "stability": 0.0,  # Creative/expressive
+        "style": 0.9,
         "description": "Frustrated, intense delivery",
     },
     "disappointed": {
-        "stability": 0.4,
+        "stability": 0.0,
         "style": 0.6,
         "description": "Let down, somber tone",
     },
@@ -53,28 +53,28 @@ EMOTION_PRESETS = {
         "description": "Optimistic, uplifting tone",
     },
     "determined": {
-        "stability": 0.6,
-        "style": 0.7,
+        "stability": 0.5,
+        "style": 0.8,
         "description": "Strong, resolute delivery",
     },
     "sad": {
-        "stability": 0.3,
+        "stability": 0.0,
         "style": 0.5,
         "description": "Melancholic, subdued tone",
     },
     "excited": {
-        "stability": 0.3,
-        "style": 0.9,
+        "stability": 0.0,
+        "style": 1.0,
         "description": "Energetic, enthusiastic delivery",
     },
     "serious": {
-        "stability": 0.7,
+        "stability": 1.0,  # Robust/stable
         "style": 0.4,
         "description": "Grave, authoritative tone",
     },
     "sarcastic": {
-        "stability": 0.4,
-        "style": 0.6,
+        "stability": 0.0,
+        "style": 0.7,
         "description": "Ironic, sardonic delivery",
     },
     "empathetic": {
@@ -83,13 +83,13 @@ EMOTION_PRESETS = {
         "description": "Warm, understanding tone",
     },
     "urgent": {
-        "stability": 0.4,
-        "style": 0.8,
+        "stability": 0.0,
+        "style": 0.9,
         "description": "Pressing, immediate delivery",
     },
     "cynical": {
         "stability": 0.5,
-        "style": 0.5,
+        "style": 0.6,
         "description": "Skeptical, world-weary tone",
     },
 }
