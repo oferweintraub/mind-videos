@@ -39,7 +39,12 @@ src/
 ├── pipeline/            # Orchestration
 │   ├── workflow1.py     # Image-based (~$4.50)
 │   └── workflow2.py     # Video-based (~$6.00)
-└── utils/               # FFMPEG, metadata tracking
+└── utils/               # FFMPEG, transitions, metadata
+    ├── ffmpeg.py        # Core FFmpeg operations
+    ├── video_transitions.py  # Sequential transitions (no speech overlap)
+    ├── audio_utils.py   # Audio preprocessing for lip-sync
+    ├── image_utils.py   # Mosaic splitting, image manipulation
+    └── metadata.py      # Cost and metadata tracking
 ```
 
 ## Key Commands
@@ -144,6 +149,53 @@ Costs are tracked per operation in `output/<project>/metadata.yaml`:
 - VEED Fabric: ~$0.08/sec of video
 - Kling: ~$0.07/sec of video
 - Sync: ~$0.05/sec of video
+
+## Video Transitions (Critical Guidelines)
+
+### The Problem with Overlapping Transitions
+Traditional video crossfades (xfade) **overlap content from both segments**. This causes speech from segment 1 and segment 2 to play simultaneously, which sounds terrible for talking-head videos.
+
+### Solution: Sequential Transitions
+**Always use sequential transitions** for videos with speech:
+
+1. Segment 1 plays **completely** (ALL speech finishes)
+2. Video fades to black (short visual fade ~0.15s)
+3. Black screen with silence (gap of 0.3-0.5s)
+4. Video fades in from black
+5. Segment 2 plays **completely**
+
+**Key principle: Speech must NEVER overlap. Let each segment's audio finish completely before transitioning.**
+
+### Configuration (`config/default.yaml`)
+```yaml
+transitions:
+  audio_crossfade: false  # MUST be false for speech videos
+  audio_gap: 0.5          # Silence gap between segments (seconds)
+  audio_fade_duration: 0.15  # Video fade duration (keep short)
+```
+
+### Implementation Details
+- Use `concatenate_with_smart_transitions()` for multiple segments
+- `detect_scene_changes_by_image()` identifies same-scene cuts (same image reused)
+- Same-scene cuts can use shorter gaps (0.3s)
+- Scene changes use longer gaps (0.5s)
+
+### What NOT to Do
+- **Don't use `audio_crossfade: true`** - causes speech overlap
+- **Don't fade audio** - it cuts off speech before it finishes
+- **Don't use xfade offset** that overlaps actual content
+
+### Testing Transitions
+```bash
+# Run transition tests
+python tests/test_crossfade_transitions.py
+
+# Test files output to: output/test_transitions/
+```
+
+### Duration Impact
+- Old overlap mode: `total = sum(durations) - transitions` (shorter)
+- Sequential mode: `total = sum(durations) + gaps` (longer, but correct)
 
 ## Testing
 
