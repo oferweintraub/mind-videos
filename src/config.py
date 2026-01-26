@@ -52,8 +52,15 @@ class AudioConfig(BaseModel):
     voice_name: str = Field(default="Jessica", description="Voice name for reference")
     model_id: str = Field(default="eleven_v3", description="ElevenLabs model (eleven_v3 recommended)")
     language_code: str = Field(default="he", description="Language code (he for Hebrew)")
-    stability: float = Field(default=0.5, description="Voice stability (0-1)")
+    stability: float = Field(default=0.5, description="Voice stability (0-1, lower = more expressive)")
     similarity_boost: float = Field(default=0.75, description="Voice similarity boost (0-1)")
+    style: float = Field(default=0.0, description="Emotional intensity (0-1, higher = more emotional)")
+    emotion: Optional[str] = Field(
+        default=None,
+        description="Emotion preset (overrides stability/style). Options: neutral, angry, "
+                    "disappointed, hopeful, determined, sad, excited, serious, sarcastic, "
+                    "empathetic, urgent, cynical"
+    )
 
 
 class VideoConfig(BaseModel):

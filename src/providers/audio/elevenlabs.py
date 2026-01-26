@@ -28,6 +28,72 @@ HEBREW_VOICES = {
     "josh": "TxGEqnHWrfWFTfGW9XjX",  # Male, natural
 }
 
+# Emotion presets: (stability, style, description)
+# Lower stability = more expressive variation
+# Higher style = more emotional intensity
+EMOTION_PRESETS = {
+    "neutral": {
+        "stability": 0.5,
+        "style": 0.0,
+        "description": "Calm, neutral delivery",
+    },
+    "angry": {
+        "stability": 0.3,
+        "style": 0.8,
+        "description": "Frustrated, intense delivery",
+    },
+    "disappointed": {
+        "stability": 0.4,
+        "style": 0.6,
+        "description": "Let down, somber tone",
+    },
+    "hopeful": {
+        "stability": 0.5,
+        "style": 0.5,
+        "description": "Optimistic, uplifting tone",
+    },
+    "determined": {
+        "stability": 0.6,
+        "style": 0.7,
+        "description": "Strong, resolute delivery",
+    },
+    "sad": {
+        "stability": 0.3,
+        "style": 0.5,
+        "description": "Melancholic, subdued tone",
+    },
+    "excited": {
+        "stability": 0.3,
+        "style": 0.9,
+        "description": "Energetic, enthusiastic delivery",
+    },
+    "serious": {
+        "stability": 0.7,
+        "style": 0.4,
+        "description": "Grave, authoritative tone",
+    },
+    "sarcastic": {
+        "stability": 0.4,
+        "style": 0.6,
+        "description": "Ironic, sardonic delivery",
+    },
+    "empathetic": {
+        "stability": 0.5,
+        "style": 0.4,
+        "description": "Warm, understanding tone",
+    },
+    "urgent": {
+        "stability": 0.4,
+        "style": 0.8,
+        "description": "Pressing, immediate delivery",
+    },
+    "cynical": {
+        "stability": 0.5,
+        "style": 0.5,
+        "description": "Skeptical, world-weary tone",
+    },
+}
+
 
 class ElevenLabsProvider(BaseAudioProvider):
     """ElevenLabs TTS provider with Hebrew support."""
@@ -43,6 +109,8 @@ class ElevenLabsProvider(BaseAudioProvider):
         language_code: str = "he",  # Hebrew
         stability: float = 0.5,
         similarity_boost: float = 0.75,
+        style: float = 0.0,  # 0 = neutral, 1 = very expressive
+        emotion: Optional[str] = None,  # Emotion preset name
         retry_config: Optional[RetryConfig] = None,
         timeout: float = 60.0,
     ):
@@ -55,9 +123,20 @@ class ElevenLabsProvider(BaseAudioProvider):
         self.voice_id = voice_id
         self.model_id = model_id
         self.language_code = language_code
-        self.stability = stability
         self.similarity_boost = similarity_boost
         self._client: Optional[AsyncElevenLabs] = None
+
+        # Apply emotion preset if specified, otherwise use direct values
+        if emotion and emotion in EMOTION_PRESETS:
+            preset = EMOTION_PRESETS[emotion]
+            self.stability = preset["stability"]
+            self.style = preset["style"]
+            self.emotion = emotion
+            logger.info(f"Using emotion preset '{emotion}': {preset['description']}")
+        else:
+            self.stability = stability
+            self.style = style
+            self.emotion = None
 
     @property
     def client(self) -> AsyncElevenLabs:
@@ -151,12 +230,22 @@ class ElevenLabsProvider(BaseAudioProvider):
         self,
         text: str,
         voice_id: str,
+        stability: Optional[float] = None,
+        style: Optional[float] = None,
     ) -> bytes:
-        """Generate audio for a single text chunk."""
+        """Generate audio for a single text chunk.
+
+        Args:
+            text: Text to convert to speech
+            voice_id: ElevenLabs voice ID
+            stability: Override stability (0-1, lower = more expressive)
+            style: Override style (0-1, higher = more emotional)
+        """
         try:
             voice_settings = VoiceSettings(
-                stability=self.stability,
+                stability=stability if stability is not None else self.stability,
                 similarity_boost=self.similarity_boost,
+                style=style if style is not None else self.style,
             )
 
             # convert() returns AsyncIterator directly (not a coroutine)
@@ -210,24 +299,52 @@ class ElevenLabsProvider(BaseAudioProvider):
         text: str,
         voice_id: Optional[str] = None,
         output_path: Optional[Path] = None,
+        emotion: Optional[str] = None,
+        stability: Optional[float] = None,
+        style: Optional[float] = None,
         **kwargs,
     ) -> tuple[bytes, float]:
-        """Generate Hebrew speech from text.
+        """Generate Hebrew speech from text with optional emotion control.
 
         Args:
             text: Hebrew text to convert to speech
             voice_id: Optional voice ID (defaults to configured voice)
             output_path: Optional path to save the audio file
+            emotion: Emotion preset name (angry, disappointed, hopeful, etc.)
+                     Overrides stability and style settings.
+            stability: Direct stability value (0-1, lower = more expressive)
+            style: Direct style value (0-1, higher = more emotional)
             **kwargs: Additional parameters (unused)
 
         Returns:
             Tuple of (audio_bytes, duration_seconds)
+
+        Available emotion presets:
+            - neutral: Calm, neutral delivery
+            - angry: Frustrated, intense delivery
+            - disappointed: Let down, somber tone
+            - hopeful: Optimistic, uplifting tone
+            - determined: Strong, resolute delivery
+            - sad: Melancholic, subdued tone
+            - excited: Energetic, enthusiastic delivery
+            - serious: Grave, authoritative tone
+            - sarcastic: Ironic, sardonic delivery
+            - empathetic: Warm, understanding tone
+            - urgent: Pressing, immediate delivery
+            - cynical: Skeptical, world-weary tone
         """
         voice_id = voice_id or self.voice_id
 
         # Validate text
         if not text or not text.strip():
             raise ProviderError("Empty text provided", self.name, recoverable=False)
+
+        # Apply emotion preset if specified
+        if emotion and emotion in EMOTION_PRESETS:
+            preset = EMOTION_PRESETS[emotion]
+            stability = preset["stability"]
+            style = preset["style"]
+            logger.info(f"Generating speech with emotion '{emotion}': {preset['description']}")
 
         # Clean text for Hebrew (remove extra whitespace)
         text = " ".join(text.split())
@@ -238,7 +355,7 @@ class ElevenLabsProvider(BaseAudioProvider):
         if len(chunks) == 1:
             # Single chunk - simple case
             async def _generate():
-                return await self._generate_chunk(text, voice_id)
+                return await self._generate_chunk(text, voice_id, stability, style)
 
             result = await self._retry_operation(_generate, "generate_speech")
 
@@ -253,11 +370,11 @@ class ElevenLabsProvider(BaseAudioProvider):
 
             audio_parts = []
             for i, chunk in enumerate(chunks):
-                async def _generate_chunk():
-                    return await self._generate_chunk(chunk, voice_id)
+                async def _generate_chunk_wrapper():
+                    return await self._generate_chunk(chunk, voice_id, stability, style)
 
                 result = await self._retry_operation(
-                    _generate_chunk,
+                    _generate_chunk_wrapper,
                     f"generate_speech_chunk_{i+1}"
                 )
 

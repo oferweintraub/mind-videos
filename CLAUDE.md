@@ -150,6 +150,55 @@ Costs are tracked per operation in `output/<project>/metadata.yaml`:
 - Kling: ~$0.07/sec of video
 - Sync: ~$0.05/sec of video
 
+## Audio Emotion Control
+
+ElevenLabs supports emotional guidance through presets or direct parameter control.
+
+### Emotion Presets
+Use presets for consistent emotional delivery:
+
+| Preset | Description | Use Case |
+|--------|-------------|----------|
+| `neutral` | Calm, neutral delivery | Informational content |
+| `angry` | Frustrated, intense | Criticism, outrage |
+| `disappointed` | Let down, somber | Letdowns, failures |
+| `hopeful` | Optimistic, uplifting | Positive outlook |
+| `determined` | Strong, resolute | Call to action |
+| `sad` | Melancholic, subdued | Tragedies, losses |
+| `excited` | Energetic, enthusiastic | Good news, achievements |
+| `serious` | Grave, authoritative | Important announcements |
+| `sarcastic` | Ironic, sardonic | Commentary, criticism |
+| `empathetic` | Warm, understanding | Support, solidarity |
+| `urgent` | Pressing, immediate | Breaking news, alerts |
+| `cynical` | Skeptical, world-weary | Political commentary |
+
+### Configuration (`config/default.yaml`)
+```yaml
+audio:
+  # Option 1: Use emotion preset (recommended)
+  emotion: determined
+
+  # Option 2: Direct control (ignored if emotion is set)
+  stability: 0.5    # 0-1, lower = more expressive variation
+  style: 0.0        # 0-1, higher = more emotional intensity
+```
+
+### Per-Segment Emotion
+Pass emotion to `generate_speech()` for per-segment control:
+```python
+audio_bytes, duration = await audio_provider.generate_speech(
+    text="הטקסט בעברית",
+    emotion="angry",  # Override default emotion for this segment
+)
+```
+
+### Best Practices
+- Match emotion to content (angry for criticism, hopeful for solutions)
+- Use `determined` for call-to-action segments
+- Use `serious` for factual/important content
+- Vary emotions across segments for engagement
+- Test audio before full video generation
+
 ## Video Transitions (Critical Guidelines)
 
 ### The Problem with Overlapping Transitions
