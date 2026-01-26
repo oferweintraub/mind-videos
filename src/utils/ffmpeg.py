@@ -155,14 +155,16 @@ async def concatenate_videos(
     output_path: Path,
     transition: Optional[str] = None,
     transition_duration: float = 0.5,
+    audio_crossfade: bool = True,
 ) -> Path:
     """Concatenate multiple video files.
 
     Args:
         video_paths: List of video file paths in order
         output_path: Path for output video
-        transition: Optional transition type (fade, dissolve)
+        transition: Optional transition type (fade, dissolve, fadeblack, etc.)
         transition_duration: Duration of transition in seconds
+        audio_crossfade: Whether to use audio crossfade (default: True)
 
     Returns:
         Path to concatenated video
@@ -179,9 +181,9 @@ async def concatenate_videos(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if transition:
-        # Use filter_complex for transitions
+        # Use filter_complex for transitions with audio crossfade
         return await _concatenate_with_transitions(
-            video_paths, output_path, transition, transition_duration
+            video_paths, output_path, transition, transition_duration, audio_crossfade
         )
 
     # Simple concatenation using concat demuxer
@@ -214,58 +216,64 @@ async def _concatenate_with_transitions(
     output_path: Path,
     transition: str,
     transition_duration: float,
+    audio_crossfade: bool = True,
 ) -> Path:
-    """Concatenate videos with transitions using filter_complex."""
-    inputs = []
-    for i, path in enumerate(video_paths):
-        inputs.extend(["-i", str(path)])
+    """Concatenate videos with transitions using filter_complex.
 
-    # Build filter complex
-    filter_parts = []
-    n = len(video_paths)
+    Supports multiple transition types and proper audio crossfading.
 
-    # Get durations for offset calculation
-    durations = []
-    for path in video_paths:
-        info = await get_video_info(path)
-        durations.append(info["duration"])
+    Args:
+        video_paths: List of video file paths in order
+        output_path: Path for output video
+        transition: Transition type (fade, dissolve, fadeblack, etc.)
+        transition_duration: Duration of transition in seconds
+        audio_crossfade: Whether to use audio crossfade (vs simple concat)
 
-    if transition == "fade":
-        # Crossfade between clips
-        prev_output = "0:v"
+    Returns:
+        Path to concatenated video
+    """
+    # For 2 videos, use the simpler and more reliable video_transitions module
+    if len(video_paths) == 2:
+        from .video_transitions import TransitionConfig, TransitionType, crossfade_two_videos
 
-        for i in range(1, n):
-            offset = sum(durations[:i]) - (i * transition_duration)
+        # Map transition string to TransitionType
+        try:
+            trans_type = TransitionType(transition)
+        except ValueError:
+            trans_type = TransitionType.DISSOLVE
 
-            filter_parts.append(
-                f"[{prev_output}][{i}:v]xfade=transition=fade:"
-                f"duration={transition_duration}:offset={offset}[v{i}]"
-            )
-            prev_output = f"v{i}"
+        config = TransitionConfig(
+            type=trans_type,
+            duration=transition_duration,
+            audio_crossfade=audio_crossfade,
+        )
 
-        # Handle audio
-        audio_filter = "".join([f"[{i}:a]" for i in range(n)])
-        filter_parts.append(f"{audio_filter}concat=n={n}:v=0:a=1[a]")
+        return await crossfade_two_videos(
+            video1_path=video_paths[0],
+            video2_path=video_paths[1],
+            output_path=output_path,
+            transition=config,
+        )
 
-        args = inputs + [
-            "-filter_complex",
-            ";".join(filter_parts),
-            "-map", f"[v{n-1}]",
-            "-map", "[a]",
-            "-c:v", "libx264",
-            "-c:a", "aac",
-            str(output_path),
-        ]
+    # For 3+ videos, use the chained approach from video_transitions
+    from .video_transitions import TransitionConfig, TransitionType, concatenate_with_crossfades
 
-    else:
-        # Default to simple concat
-        return await concatenate_videos(video_paths, output_path)
+    try:
+        trans_type = TransitionType(transition)
+    except ValueError:
+        trans_type = TransitionType.DISSOLVE
 
-    await run_ffmpeg(args, timeout=600)
+    default_transition = TransitionConfig(
+        type=trans_type,
+        duration=transition_duration,
+        audio_crossfade=audio_crossfade,
+    )
 
-    logger.info(f"Concatenated {n} videos with {transition} transition")
-
-    return output_path
+    return await concatenate_with_crossfades(
+        video_paths=video_paths,
+        output_path=output_path,
+        default_transition=default_transition,
+    )
 
 
 async def add_subtitles(

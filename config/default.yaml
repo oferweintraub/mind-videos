@@ -20,7 +20,7 @@ audio:
 video:
   primary_provider: fal
   fallback_provider: replicate
-  resolution: 480p
+  resolution: 480p  # Options: 480p, 720p (720p is ~88% more expensive but better quality)
   max_retries: 3
   poll_interval: 5
   timeout: 300
@@ -32,6 +32,33 @@ video:
   kling_replicate_model: klingai/kling-2.5-pro
   sync_model: fal-ai/sync-lipsync-2-pro
   sync_replicate_model: sync/lipsync-2-pro
+
+transitions:
+  # Default transition for scene changes
+  default_type: fade      # Visual transition type (fade recommended for speech videos)
+  default_duration: 0.5   # Duration in seconds for video fade
+
+  # Transition for same-scene cuts (when same image is reused)
+  same_scene_type: fade
+  same_scene_duration: 0.3
+
+  # Audio transition settings
+  # audio_crossfade=false ensures speech never overlaps:
+  # - Segment 1 plays fully (all speech), fades to black
+  # - Brief silence gap (black screen)
+  # - Segment 2 fades in, plays fully (all speech)
+  audio_crossfade: false  # false = sequential mode, speech never overlaps (recommended)
+  audio_gap: 0.5          # Silence gap between segments (seconds)
+  audio_fade_duration: 0.15  # Video fade duration (audio stays full)
+  audio_curve: exp        # Fade curve for audio crossfade mode only
+
+audio_preprocessing:
+  # Preprocessing for better lip-sync quality
+  enabled: true
+  normalize: true
+  normalize_lufs: -16.0
+  trim_silence: true
+  sample_rate: 44100
 
 image:
   provider: nano_banana

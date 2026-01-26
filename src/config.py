@@ -108,6 +108,34 @@ class SubtitleConfig(BaseModel):
     margin_v: int = Field(default=20, description="Vertical margin from edge")
 
 
+class TransitionsConfig(BaseModel):
+    """Video transition configuration."""
+
+    # Default transition for scene changes
+    default_type: str = Field(default="dissolve", description="Default transition type")
+    default_duration: float = Field(default=0.5, description="Video transition duration (seconds)")
+
+    # Same-scene transition (when same image is reused)
+    same_scene_type: str = Field(default="fade", description="Transition for same-scene cuts")
+    same_scene_duration: float = Field(default=0.25, description="Duration for same-scene transitions")
+
+    # Audio transition settings
+    audio_crossfade: bool = Field(default=False, description="If True, overlap audio; if False, use gap with fades")
+    audio_gap: float = Field(default=0.5, description="Total silence gap between audio segments")
+    audio_fade_duration: float = Field(default=0.25, description="Fade out/in duration on each side")
+    audio_curve: str = Field(default="exp", description="Audio fade curve (exp, log, tri, lin)")
+
+
+class AudioPreprocessingConfig(BaseModel):
+    """Audio preprocessing configuration for improved lip-sync quality."""
+
+    enabled: bool = Field(default=True, description="Enable audio preprocessing")
+    normalize: bool = Field(default=True, description="Normalize audio levels")
+    normalize_lufs: float = Field(default=-16.0, description="Target loudness in LUFS")
+    trim_silence: bool = Field(default=True, description="Trim silence from audio")
+    sample_rate: int = Field(default=44100, description="Target sample rate in Hz")
+
+
 class PipelineConfig(BaseModel):
     """Pipeline execution configuration."""
 
@@ -131,6 +159,8 @@ class Config(BaseModel):
     image: ImageConfig = Field(default_factory=ImageConfig)
     subtitle: SubtitleConfig = Field(default_factory=SubtitleConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
+    transitions: TransitionsConfig = Field(default_factory=TransitionsConfig)
+    audio_preprocessing: AudioPreprocessingConfig = Field(default_factory=AudioPreprocessingConfig)
 
     # Paths
     output_dir: Path = Field(default=Path("output"), description="Output directory")

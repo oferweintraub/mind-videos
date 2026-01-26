@@ -22,7 +22,17 @@ from ..schemas import (
     VideoValidation,
 )
 from ..services import QualityValidator, ScenePlanner, ScriptGenerator, SubtitleGenerator
-from ..utils import MetadataTracker, add_subtitles, concatenate_videos, extract_thumbnails
+from ..utils import (
+    MetadataTracker,
+    add_subtitles,
+    concatenate_videos,
+    concatenate_with_smart_transitions,
+    detect_scene_changes_by_image,
+    extract_thumbnails,
+    preprocess_for_lipsync,
+    TransitionConfig,
+    TransitionType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +200,8 @@ class Workflow1Pipeline:
     ) -> tuple[bytes, float]:
         """Generate audio for a single segment.
 
+        Applies audio preprocessing for improved lip-sync quality if enabled.
+
         Args:
             segment: Segment to generate audio for
             output_dir: Directory to save audio
@@ -203,8 +215,23 @@ class Workflow1Pipeline:
 
         audio_bytes, duration = await self._audio_provider.generate_speech(
             text=segment.text,
-            output_path=audio_path,
+            output_path=None,  # Don't save yet, we may preprocess
         )
+
+        # Apply audio preprocessing for better lip-sync if enabled
+        if self.config.audio_preprocessing.enabled:
+            logger.debug(f"Preprocessing audio for segment {segment.index}...")
+            audio_bytes = await preprocess_for_lipsync(
+                audio_input=audio_bytes,
+                output_path=audio_path,
+                normalize=self.config.audio_preprocessing.normalize,
+                trim=self.config.audio_preprocessing.trim_silence,
+                target_lufs=self.config.audio_preprocessing.normalize_lufs,
+                sample_rate=self.config.audio_preprocessing.sample_rate,
+            )
+        else:
+            # Save directly without preprocessing
+            audio_path.write_bytes(audio_bytes)
 
         segment.audio_path = str(audio_path)
         segment.audio_duration = duration
@@ -393,6 +420,9 @@ class Workflow1Pipeline:
     ) -> Path:
         """Concatenate segments, add subtitles, extract thumbnails.
 
+        Uses smart transitions: shorter fades for same-scene cuts,
+        longer dissolves for scene changes.
+
         Args:
             segments: Processed segments
             output_dir: Output directory
@@ -401,23 +431,60 @@ class Workflow1Pipeline:
         Returns:
             Path to final video
         """
-        # Get video paths
+        # Get sorted segments and their paths
+        sorted_segments = sorted(segments.segments, key=lambda x: x.index)
         video_paths = [
             Path(s.video_path)
-            for s in sorted(segments.segments, key=lambda x: x.index)
+            for s in sorted_segments
             if s.video_path
         ]
 
         if not video_paths:
             raise ValueError("No video segments to concatenate")
 
-        # Concatenate videos
+        # Detect same-scene segments based on image reuse
+        image_paths = [s.image_path for s in sorted_segments if s.video_path]
+        same_scene_indices = detect_scene_changes_by_image(image_paths)
+
+        logger.info(
+            f"Detected {len(same_scene_indices)} same-scene transitions, "
+            f"{len(video_paths) - 1 - len(same_scene_indices)} scene changes"
+        )
+
+        # Concatenate videos with smart transitions from config
         concatenated_path = output_dir / "video_raw.mp4"
-        await concatenate_videos(
+
+        # Map config transition types to TransitionType enum
+        try:
+            same_scene_type = TransitionType(self.config.transitions.same_scene_type)
+        except ValueError:
+            same_scene_type = TransitionType.FADE
+
+        try:
+            scene_change_type = TransitionType(self.config.transitions.default_type)
+        except ValueError:
+            scene_change_type = TransitionType.DISSOLVE
+
+        await concatenate_with_smart_transitions(
             video_paths=video_paths,
             output_path=concatenated_path,
-            transition="fade",
-            transition_duration=0.3,
+            same_scene_indices=same_scene_indices,
+            same_scene_transition=TransitionConfig(
+                type=same_scene_type,
+                duration=self.config.transitions.same_scene_duration,
+                audio_crossfade=self.config.transitions.audio_crossfade,
+                audio_gap=self.config.transitions.audio_gap,
+                audio_fade_duration=self.config.transitions.audio_fade_duration,
+                audio_curve=self.config.transitions.audio_curve,
+            ),
+            scene_change_transition=TransitionConfig(
+                type=scene_change_type,
+                duration=self.config.transitions.default_duration,
+                audio_crossfade=self.config.transitions.audio_crossfade,
+                audio_gap=self.config.transitions.audio_gap,
+                audio_fade_duration=self.config.transitions.audio_fade_duration,
+                audio_curve=self.config.transitions.audio_curve,
+            ),
         )
 
         # Generate subtitles
