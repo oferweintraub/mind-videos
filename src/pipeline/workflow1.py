@@ -197,6 +197,7 @@ class Workflow1Pipeline:
         self,
         segment,
         output_dir: Path,
+        emotion: Optional[str] = None,
     ) -> tuple[bytes, float]:
         """Generate audio for a single segment.
 
@@ -205,6 +206,7 @@ class Workflow1Pipeline:
         Args:
             segment: Segment to generate audio for
             output_dir: Directory to save audio
+            emotion: Emotion preset for this segment (serious, urgent, angry, etc.)
 
         Returns:
             Tuple of (audio_bytes, duration)
@@ -216,6 +218,7 @@ class Workflow1Pipeline:
         audio_bytes, duration = await self._audio_provider.generate_speech(
             text=segment.text,
             output_path=None,  # Don't save yet, we may preprocess
+            emotion=emotion,
         )
 
         # Apply audio preprocessing for better lip-sync if enabled

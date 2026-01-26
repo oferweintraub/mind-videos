@@ -82,7 +82,7 @@ class Segment(BaseModel):
     duration_estimate: float = Field(
         description="Estimated duration in seconds",
         ge=3.0,
-        le=15.0
+        le=25.0
     )
     scene: SceneDefinition = Field(
         description="Scene direction for this segment"
@@ -123,7 +123,7 @@ class SegmentList(BaseModel):
 
     segments: list[Segment] = Field(
         description="List of video segments",
-        min_length=4,
+        min_length=3,
         max_length=10
     )
 

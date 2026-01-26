@@ -8,6 +8,7 @@ pydantic>=2.9.0
 
 # Audio
 elevenlabs>=1.0.0
+mutagen>=1.47.0
 
 # Video Providers
 fal-client>=0.5.0

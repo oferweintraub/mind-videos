@@ -64,6 +64,15 @@ python -m src.main status
 
 # Health check all providers
 python -m src.main health
+
+# Government Accountability Video (predefined script)
+python -m scripts.generate_accountability_video generate --output ./output/accountability
+
+# Test audio with emotions only
+python -m scripts.generate_accountability_video test-audio
+
+# Generate images only
+python -m scripts.generate_accountability_video images
 ```
 
 ## Two Workflows
@@ -113,6 +122,109 @@ rhetorical_devices:
   - "contrast"
 call_to_action: "מה הצופה צריך לעשות"
 ```
+
+## Best Practices: Dramatic Talking-Head Videos
+
+### Target Platforms & Aspect Ratios
+
+| Platform | Aspect Ratio | Resolution |
+|----------|--------------|------------|
+| YouTube | 16:9 | 1920x1080 |
+| Twitter/X | 9:16 | 1080x1920 |
+| Instagram Reels | 9:16 | 1080x1920 |
+| TikTok | 9:16 | 1080x1920 |
+
+Set in `config/default.yaml`:
+```yaml
+image:
+  aspect_ratio: "9:16"  # For vertical (social) or "16:9" for YouTube
+```
+
+### Recommended Workflow
+
+#### 1. Script First
+- Write and review the full Hebrew text before any generation
+- Split into **3 segments** of ~15-20 seconds each (~50-60s total)
+- Save segments to `output/<project>/texts/` for review
+- Structure: Setup → Pivot/Question → Conclusion
+
+#### 2. Image Generation (1 ref → 5 images → select 3)
+- Start with **one reference image** for character consistency
+- Generate **5 image variations** using different prompts/poses
+- **Manually select the best 3** that maintain character consistency
+- Assign one image per segment (don't reuse for dramatic videos)
+
+**Image guidelines per segment:**
+| Segment | Suggested Image |
+|---------|-----------------|
+| 1 - Setup | Medium shot, seated or standing, calm/serious |
+| 2 - Pivot | Medium shot, direct to camera, urgent expression |
+| 3 - Conclusion | Close-up, intense/angry expression |
+
+**Avoid in images:**
+- Hands near face (confuses lip-sync)
+- Complex gestures
+- Busy backgrounds
+
+#### 3. Audio Generation with Emotional Arc
+Build emotional intensity across segments:
+
+| Segment | Recommended Emotion | Description |
+|---------|---------------------|-------------|
+| 1 | `serious` or `neutral` | Calm setup, storytelling |
+| 2 | `urgent` or `determined` | Building tension |
+| 3 | `angry` or `determined` | Peak intensity, call to action |
+
+**Always test audio first:**
+```bash
+python -m scripts.generate_accountability_video test-audio
+```
+
+#### 4. Video Generation & Lip-Sync Quality
+- Review each segment's lip-sync before final concatenation
+- If lip-sync is poor, try:
+  - Different source image (cleaner face, no hand gestures)
+  - Different emotion preset (slower speech = better sync)
+  - Workflow 2 (Kling + Sync) for difficult cases
+
+#### 5. Concatenation: Use Direct Cuts
+For dramatic talking-head videos, **direct cuts work best**:
+- No fade transitions
+- No gap/silence between segments
+- Creates punchy, news-like feel
+- Enhances emotional escalation
+
+```bash
+# Simple ffmpeg concat for direct cuts
+ffmpeg -f concat -safe 0 -i concat_list.txt -c copy output.mp4
+```
+
+### Quick Reference Checklist
+
+```
+[ ] Script written and reviewed
+[ ] Script split into 3 segments (~15-20s each)
+[ ] Reference image selected
+[ ] 5 images generated, 3 selected
+[ ] Audio tested with emotional arc (serious → urgent → angry)
+[ ] Lip-sync quality verified per segment
+[ ] Final video concatenated with direct cuts
+[ ] Subtitles added (embedded or burned in)
+```
+
+### Example: Government Accountability Video
+
+```bash
+# Full generation with predefined script
+python -m scripts.generate_accountability_video generate
+
+# Or step by step:
+python -m scripts.generate_accountability_video test-audio    # Test emotions
+python -m scripts.generate_accountability_video images        # Generate images
+python -m scripts.generate_accountability_video generate --skip-audio --skip-images  # Video only
+```
+
+---
 
 ## Important Conventions
 

@@ -82,10 +82,10 @@ subtitle:
 
 pipeline:
   default_workflow: 1
-  segments_min: 6
-  segments_max: 8
-  segment_duration_min: 6.0
-  segment_duration_max: 10.0
+  segments_min: 3
+  segments_max: 5
+  segment_duration_min: 10.0
+  segment_duration_max: 20.0
   preview_segments: 4
   quality_threshold: 0.7
   max_remake_attempts: 2
