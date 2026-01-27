@@ -235,39 +235,36 @@
 
 ---
 
-## Phase 7: Mosaic Image Generation 🚧
+## Phase 7: Reference Image Workflow ✅
 
-### 7.1 Mosaic Generation
-- [ ] **7.1.1** Update `NanoBananaProvider` to support mosaic prompts
-- [ ] **7.1.2** Add `generate_mosaic()` method for 2x3 grid generation
-- [ ] **7.1.3** Prompt template: "2x3 grid of same character in 6 settings: sofa, kitchen, balcony, standing, close-up, side angle"
-- [ ] **7.1.4** Test mosaic quality and character consistency
+> **Current workflow**: Generate reference → use reference for all scene images → select best 3 → video generation
 
-### 7.2 Mosaic Splitting
-- [ ] **7.2.1** `utils/image_utils.py` - PIL-based mosaic splitter
-- [ ] **7.2.2** `split_mosaic()` - Split 2x3 grid into 6 images
-- [ ] **7.2.3** Auto-detect grid dimensions from image size
-- [ ] **7.2.4** Save individual images with consistent naming
-- [ ] **7.2.5** Write unit tests
+### 7.1 Reference Image Generation
+- [x] **7.1.1** Generate 3 potential reference images with Nano Banana Pro
+- [x] **7.1.2** Selection criteria: face clarity, hair definition, lip-sync friendliness
+- [x] **7.1.3** Save selected reference as `selected_reference.png`
+- [x] **7.1.4** Implemented in `scripts/proper_workflow.py` Step 1
 
-### 7.3 Image Selection
-- [ ] **7.3.1** Interactive selection mode (CLI with image preview)
-- [ ] **7.3.2** Config-based selection (specify indices in config)
-- [ ] **7.3.3** Auto-select mode (first 3 by default)
-- [ ] **7.3.4** `ImageSelector` class with selection modes
+### 7.2 Scene Image Generation WITH Reference
+- [x] **7.2.1** Pass reference image bytes to EVERY scene generation call
+- [x] **7.2.2** Generate 5 scene images at various home settings
+- [x] **7.2.3** Maintain face, lighting, character consistency across all 5
+- [x] **7.2.4** Select best 3 images for the 3 video segments
+- [x] **7.2.5** Implemented in `scripts/proper_workflow.py` Step 2
 
-### 7.4 Segment-Image Assignment
-- [ ] **7.4.1** `SegmentImageMapper` - Apply reuse pattern
-- [ ] **7.4.2** Default pattern: `[1, 1, 2, 2, 3]` for 5 segments
-- [ ] **7.4.3** Configurable patterns for different segment counts
-- [ ] **7.4.4** Pattern validation (enough images for pattern)
+### 7.3 Provider Implementation
+- [x] **7.3.1** `NanoBananaProvider.generate_image()` with reference_image parameter
+- [x] **7.3.2** Pass reference as `types.Part.from_bytes()` in contents
+- [x] **7.3.3** Prompt engineering for face consistency ("this SAME woman", "EXACT same face")
+- [x] **7.3.4** Tested and working in production
 
-### 7.5 Pipeline Integration
-- [ ] **7.5.1** Update `Workflow1Pipeline` for mosaic mode
-- [ ] **7.5.2** Add `--mosaic` CLI flag
-- [ ] **7.5.3** Add `--pattern` CLI flag for custom patterns
-- [ ] **7.5.4** Metadata tracking for image reuse pattern
-- [ ] **7.5.5** End-to-end test: mosaic → split → select → generate → concatenate
+### 7.4 Workflow Script
+- [x] **7.4.1** `scripts/proper_workflow.py` - Full 6-step workflow
+- [x] **7.4.2** Step-by-step execution: `python scripts/proper_workflow.py [1-6|all]`
+- [x] **7.4.3** Auto-selection of reference and scene images
+- [x] **7.4.4** Integration with ElevenLabs audio (serious → urgent → angry)
+- [x] **7.4.5** Integration with VEED Fabric video generation
+- [x] **7.4.6** FFmpeg concatenation with direct cuts
 
 ---
 
@@ -330,9 +327,9 @@ Before marking any task DONE:
 | Phase 4: Workflow 2 | 16 | 12 | 75% |
 | Phase 5: Content Brief | 20 | 18 | 90% |
 | Phase 6: Error Handling | 19 | 17 | 89% |
-| Phase 7: Mosaic Images | 17 | 10 | 59% |
+| Phase 7: Reference Image Workflow | 16 | 16 | 100% |
 | Phase 8: Quality Refinement | 17 | 0 | 0% |
-| **Total** | **146** | **98** | **67%** |
+| **Total** | **145** | **104** | **72%** |
 
-> **Tomorrow's Priority:** Phase 8 - Quality Refinement (lip-sync, character consistency, transitions, audio, resolution)
-> Note: Phase 7 mosaic workflow is functional. Phase 8 focuses on achieving smooth, lifelike results.
+> **Current Status:** Phase 7 (Reference Image Workflow) complete and working via `scripts/proper_workflow.py`.
+> **Next Priority:** Phase 8 - Quality Refinement (lip-sync tuning, transition timing, audio pacing).

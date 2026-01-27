@@ -2,387 +2,164 @@
 
 ## Project Overview
 
-Automated pipeline for generating 1-minute Hebrew educational videos promoting democracy, accountability, empathy, and diverse perspectives. Uses AI for script generation, image creation, voice synthesis, and video production.
+Automated pipeline for generating 1-minute Hebrew educational videos promoting democracy, accountability, empathy, and diverse perspectives.
 
 ## Tech Stack
 
-| Component | Provider | Primary API | Fallback |
-|-----------|----------|-------------|----------|
-| LLM | Claude 4.5 Sonnet | Anthropic | Gemini 3.0 Flash |
-| Images | Nano Banana Pro | Google AI (Imagen 3) | - |
-| Audio/TTS | ElevenLabs V3 | ElevenLabs (he) | - |
-| Video (Workflow 1) | VEED Fabric | Fal.ai | Replicate |
-| Video (Workflow 2) | Kling 2.5 + Sync | Fal.ai | Replicate |
+| Component | Provider | API |
+|-----------|----------|-----|
+| Images | Nano Banana Pro | Google AI |
+| Audio/TTS | ElevenLabs V3 | ElevenLabs (he) |
+| Video + Lip-sync | VEED Fabric 1.0 | Fal.ai |
+| Concatenation | FFmpeg | Local |
 
 ## Project Structure
 
 ```
+scripts/
+├── proper_workflow.py      # THE main workflow (use this)
+├── regenerate_videos.py    # Asset reuse (new character, same audio)
+└── mini_test_lipsync.py    # Quick test for debugging
+
 src/
-├── main.py              # CLI entry point
-├── config.py            # Configuration management
-├── schemas/             # Pydantic models
-│   ├── brief.py         # ContentBrief for detailed script steering
-│   ├── script.py        # Script and ScriptRequest models
-│   ├── segment.py       # Video segment definitions
-│   └── validation.py    # Quality validation schemas
-├── providers/           # External API integrations
-│   ├── base.py          # Base classes, circuit breaker, batch handling
-│   ├── llm/             # Claude, Gemini
-│   ├── audio/           # ElevenLabs
-│   ├── image/           # Nano Banana (Google AI)
-│   └── video/           # VEED Fabric, Kling, Sync (fal/ and replicate/)
-├── services/            # Business logic
-│   ├── script_generator.py
-│   ├── scene_planner.py
-│   ├── quality_validator.py
-│   └── subtitle_generator.py
-├── pipeline/            # Orchestration
-│   ├── workflow1.py     # Image-based (~$4.50)
-│   └── workflow2.py     # Video-based (~$6.00)
-└── utils/               # FFMPEG, transitions, metadata
-    ├── ffmpeg.py        # Core FFmpeg operations
-    ├── video_transitions.py  # Sequential transitions (no speech overlap)
-    ├── audio_utils.py   # Audio preprocessing for lip-sync
-    ├── image_utils.py   # Mosaic splitting, image manipulation
-    └── metadata.py      # Cost and metadata tracking
+├── providers/
+│   ├── audio/elevenlabs.py   # Hebrew TTS
+│   ├── image/nano_banana.py  # Image generation with reference
+│   └── video/fal/veed_fabric.py  # Lip-sync video
+├── utils/
+│   ├── ffmpeg.py             # Video operations
+│   └── video_transitions.py  # Concatenation
+└── ...
+
+config/default.yaml  # Configuration
+briefs/              # Content briefs
 ```
 
-## Key Commands
+## Quick Start
 
 ```bash
-# Run single segment test
-python -m src.main test --text "שלום עולם" --image ./ref.png
-
-# Generate full video (simple mode)
-python -m src.main generate --topic "government accountability" --angle "empathetic"
-
-# Generate full video (detailed brief mode - recommended)
-python -m src.main generate --brief ./briefs/october7_investigation.yaml --image ./ref.png
-
-# Check configuration
-python -m src.main status
-
-# Health check all providers
-python -m src.main health
-
-# Government Accountability Video (predefined script)
-python -m scripts.generate_accountability_video generate --output ./output/accountability
-
-# Test audio with emotions only
-python -m scripts.generate_accountability_video test-audio
-
-# Generate images only
-python -m scripts.generate_accountability_video images
-```
-
-## Two Workflows
-
-**Workflow 1 (Image-based, ~$4.50)**
-- Uses VEED Fabric for direct image+audio → video with lip-sync
-- Faster, cheaper, good for most use cases
-
-**Workflow 2 (Video-based, ~$6.00)**
-- Uses Kling for image → video with motion
-- Then Sync for adding lip-sync
-- Higher quality motion, better for dynamic content
-
-## Image Generation Strategy
-
-To avoid Nano Banana rate limits and improve character consistency:
-
-**Mosaic Approach**
-1. Generate a 2x3 mosaic with 6 character variations in one API call
-2. Split into 6 individual images using PIL (no API calls)
-3. User selects best 3 images
-4. Apply reuse pattern `[1, 1, 2, 2, 3]` across 5 segments
-
-**Variations in Mosaic:**
-- Sofa, kitchen, balcony, standing, close-up, side angle
-- Same character, different settings/poses
-
-**Benefits:**
-- 1 API call instead of 5-8
-- Better character consistency
-- User control over image selection
-- Cost: ~$0.02 vs ~$0.10
-
-## Content Briefs
-
-For quality output, use detailed briefs instead of simple topic/angle:
-
-```yaml
-# briefs/example.yaml
-title: "כותרת בעברית"
-key_points:
-  - "נקודה ראשונה"
-  - "נקודה שנייה"
-emotional_tone: "determined"  # angry, hopeful, cynical, etc.
-rhetorical_devices:
-  - "rhetorical_questions"
-  - "contrast"
-call_to_action: "מה הצופה צריך לעשות"
-```
-
-## Best Practices: Dramatic Talking-Head Videos
-
-### Target Platforms & Aspect Ratios
-
-| Platform | Aspect Ratio | Resolution |
-|----------|--------------|------------|
-| YouTube | 16:9 | 1920x1080 |
-| Twitter/X | 9:16 | 1080x1920 |
-| Instagram Reels | 9:16 | 1080x1920 |
-| TikTok | 9:16 | 1080x1920 |
-
-Set in `config/default.yaml`:
-```yaml
-image:
-  aspect_ratio: "9:16"  # For vertical (social) or "16:9" for YouTube
-```
-
-### Recommended Workflow
-
-#### 1. Script First
-- Write and review the full Hebrew text before any generation
-- Split into **3 segments** of ~15-20 seconds each (~50-60s total)
-- Save segments to `output/<project>/texts/` for review
-- Structure: Setup → Pivot/Question → Conclusion
-
-#### 2. Image Generation (1 ref → 5 images → select 3)
-- Start with **one reference image** for character consistency
-- Generate **5 image variations** using different prompts/poses
-- **Manually select the best 3** that maintain character consistency
-- Assign one image per segment (don't reuse for dramatic videos)
-
-**Image guidelines per segment:**
-| Segment | Suggested Image |
-|---------|-----------------|
-| 1 - Setup | Medium shot, seated or standing, calm/serious |
-| 2 - Pivot | Medium shot, direct to camera, urgent expression |
-| 3 - Conclusion | Close-up, intense/angry expression |
-
-**Avoid in images:**
-- Hands near face (confuses lip-sync)
-- Complex gestures
-- Busy backgrounds
-
-#### 3. Audio Generation with Emotional Arc
-Build emotional intensity across segments:
-
-| Segment | Recommended Emotion | Description |
-|---------|---------------------|-------------|
-| 1 | `serious` or `neutral` | Calm setup, storytelling |
-| 2 | `urgent` or `determined` | Building tension |
-| 3 | `angry` or `determined` | Peak intensity, call to action |
-
-**Always test audio first:**
-```bash
-python -m scripts.generate_accountability_video test-audio
-```
-
-#### 4. Video Generation & Lip-Sync Quality
-- Review each segment's lip-sync before final concatenation
-- If lip-sync is poor, try:
-  - Different source image (cleaner face, no hand gestures)
-  - Different emotion preset (slower speech = better sync)
-  - Workflow 2 (Kling + Sync) for difficult cases
-
-#### 5. Concatenation: Use Direct Cuts
-For dramatic talking-head videos, **direct cuts work best**:
-- No fade transitions
-- No gap/silence between segments
-- Creates punchy, news-like feel
-- Enhances emotional escalation
-
-```bash
-# Simple ffmpeg concat for direct cuts
-ffmpeg -f concat -safe 0 -i concat_list.txt -c copy output.mp4
-```
-
-### Quick Reference Checklist
-
-```
-[ ] Script written and reviewed
-[ ] Script split into 3 segments (~15-20s each)
-[ ] Reference image selected
-[ ] 5 images generated, 3 selected
-[ ] Audio tested with emotional arc (serious → urgent → angry)
-[ ] Lip-sync quality verified per segment
-[ ] Final video concatenated with direct cuts
-[ ] Subtitles added (embedded or burned in)
-```
-
-### Example: Government Accountability Video
-
-```bash
-# Full generation with predefined script
-python -m scripts.generate_accountability_video generate
+# Run the full workflow
+source venv/bin/activate
+python scripts/proper_workflow.py all
 
 # Or step by step:
-python -m scripts.generate_accountability_video test-audio    # Test emotions
-python -m scripts.generate_accountability_video images        # Generate images
-python -m scripts.generate_accountability_video generate --skip-audio --skip-images  # Video only
+python scripts/proper_workflow.py 1  # Generate 3 ref images → select best
+python scripts/proper_workflow.py 2  # Generate 5 scenes with ref → select 3
+python scripts/proper_workflow.py 3  # Prepare text segments
+python scripts/proper_workflow.py 4  # Generate audio (ElevenLabs)
+python scripts/proper_workflow.py 5  # Generate videos (Fabric 1.0)
+python scripts/proper_workflow.py 6  # Concatenate with FFmpeg
+
+# Quick lip-sync test
+python scripts/mini_test_lipsync.py
 ```
 
 ---
 
-## Important Conventions
+## THE PROPER WORKFLOW (MUST FOLLOW EXACTLY)
 
-### Hebrew Text
-- All scripts generated in Hebrew
-- RTL encoding handled in subtitle generator
-- ~15 characters/second speech pace estimate
+### Step 1: Generate Reference Images
+- Generate **3 potential reference images** with Nano Banana Pro
+- Select **best one** based on: face clarity, hair definition, lip-sync friendliness
+- Save as `selected_reference.png`
 
-### Error Handling
-- Circuit breaker pattern: providers auto-disable after 5 failures
-- Batch operations return `BatchResult` with structured error tracking
-- Per-operation timeouts (video: 300s, polling: 600s)
+### Step 2: Generate Scene Images WITH Reference
+- Use selected reference to generate **5 scene images** at various home settings
+- **CRITICAL**: Pass reference image to EVERY generation call
+- Ensure face, lighting, character consistent across all 5
+- Select **best 3** for the 3 video segments
 
-### Provider Fallback
-- Fal.ai is primary for all video operations
-- Replicate is automatic fallback on failure
-- `FallbackProvider` wrapper handles switching
+### Step 3: Prepare Text
+- Get full text for 45-60 second video
+- Split into **3 parts** matching emotional arc
+
+### Step 4: Generate Audio
+- Use **ElevenLabs Jessica voice** (`EXAVITQu4vr4xnSDxMaL`)
+- Emotions: `serious` → `urgent` → `angry`
+
+### Step 5: Generate Videos
+- Use **Fabric 1.0** (`veed/fabric-1.0`) via fal.ai
+- Input: segment image + segment audio
+- **Note**: ~15 seconds processing per second of audio
+
+### Step 6: Concatenate
+- **FFmpeg with direct cuts** (no crossfades, no gaps)
+
+---
+
+## Image Generation with Reference
+
+**CRITICAL: Always pass reference image to maintain face consistency.**
+
+```python
+from google import genai
+from google.genai import types
+
+client = genai.Client(api_key=api_key)
+reference_bytes = Path("selected_reference.png").read_bytes()
+
+response = client.models.generate_content(
+    model="nano-banana-pro-preview",
+    contents=[
+        types.Part.from_bytes(data=reference_bytes, mime_type='image/png'),
+        "Generate a 9:16 image of this SAME woman in a living room...",
+    ],
+    config=types.GenerateContentConfig(response_modalities=['image', 'text'])
+)
+```
+
+**Prompt tips:**
+- "this SAME woman (use the reference image)"
+- "Maintain EXACT same face, hair, features"
+- "No hands near face" (for lip-sync)
+
+**Selection criteria:**
+| Criteria | Weight |
+|----------|--------|
+| Face match | HIGH |
+| Hair consistency | HIGH |
+| Clear mouth (lip-sync) | HIGH |
+| Expression match | MEDIUM |
+
+---
+
+## Audio Emotion Presets
+
+| Preset | Use Case |
+|--------|----------|
+| `serious` | Calm setup, storytelling |
+| `urgent` | Building tension |
+| `angry` | Peak intensity, call to action |
+| `determined` | Strong conclusion |
+
+---
 
 ## API Keys Required
 
 ```bash
 # .env file
-FAL_API_KEY=           # Primary video provider
-REPLICATE_API_TOKEN=   # Fallback video provider
+FAL_KEY=               # Video generation (fal.ai)
 ELEVENLABS_API_KEY=    # Hebrew TTS
-ANTHROPIC_API_KEY=     # Claude LLM
-GOOGLE_API_KEY=        # Gemini LLM + Imagen
+GOOGLE_API_KEY=        # Image generation
 ```
 
-## Cost Tracking
+---
 
-Costs are tracked per operation in `output/<project>/metadata.yaml`:
-- ElevenLabs: ~$0.30/min of audio
-- VEED Fabric: ~$0.08/sec of video
-- Kling: ~$0.07/sec of video
-- Sync: ~$0.05/sec of video
+## Troubleshooting
 
-## Audio Emotion Control
+**Video generation slow?**
+- Longer audio = longer processing (~15s per second of audio)
+- Use 480p resolution for faster processing
 
-ElevenLabs supports emotional guidance through presets or direct parameter control.
+**Face not consistent?**
+- Ensure reference image is passed to EVERY scene generation
+- Check that reference has clear, well-lit face
 
-### Emotion Presets
-Use presets for consistent emotional delivery:
+**Lip-sync issues?**
+- Avoid images with hands near face
+- Use cleaner face shots
+- Try different emotion preset (slower speech = better sync)
 
-| Preset | Description | Use Case |
-|--------|-------------|----------|
-| `neutral` | Calm, neutral delivery | Informational content |
-| `angry` | Frustrated, intense | Criticism, outrage |
-| `disappointed` | Let down, somber | Letdowns, failures |
-| `hopeful` | Optimistic, uplifting | Positive outlook |
-| `determined` | Strong, resolute | Call to action |
-| `sad` | Melancholic, subdued | Tragedies, losses |
-| `excited` | Energetic, enthusiastic | Good news, achievements |
-| `serious` | Grave, authoritative | Important announcements |
-| `sarcastic` | Ironic, sardonic | Commentary, criticism |
-| `empathetic` | Warm, understanding | Support, solidarity |
-| `urgent` | Pressing, immediate | Breaking news, alerts |
-| `cynical` | Skeptical, world-weary | Political commentary |
-
-### Configuration (`config/default.yaml`)
-```yaml
-audio:
-  # Option 1: Use emotion preset (recommended)
-  emotion: determined
-
-  # Option 2: Direct control (ignored if emotion is set)
-  stability: 0.5    # 0-1, lower = more expressive variation
-  style: 0.0        # 0-1, higher = more emotional intensity
-```
-
-### Per-Segment Emotion
-Pass emotion to `generate_speech()` for per-segment control:
-```python
-audio_bytes, duration = await audio_provider.generate_speech(
-    text="הטקסט בעברית",
-    emotion="angry",  # Override default emotion for this segment
-)
-```
-
-### Best Practices
-- Match emotion to content (angry for criticism, hopeful for solutions)
-- Use `determined` for call-to-action segments
-- Use `serious` for factual/important content
-- Vary emotions across segments for engagement
-- Test audio before full video generation
-
-## Video Transitions (Critical Guidelines)
-
-### The Problem with Overlapping Transitions
-Traditional video crossfades (xfade) **overlap content from both segments**. This causes speech from segment 1 and segment 2 to play simultaneously, which sounds terrible for talking-head videos.
-
-### Solution: Sequential Transitions
-**Always use sequential transitions** for videos with speech:
-
-1. Segment 1 plays **completely** (ALL speech finishes)
-2. Video fades to black (short visual fade ~0.15s)
-3. Black screen with silence (gap of 0.3-0.5s)
-4. Video fades in from black
-5. Segment 2 plays **completely**
-
-**Key principle: Speech must NEVER overlap. Let each segment's audio finish completely before transitioning.**
-
-### Configuration (`config/default.yaml`)
-```yaml
-transitions:
-  audio_crossfade: false  # MUST be false for speech videos
-  audio_gap: 0.5          # Silence gap between segments (seconds)
-  audio_fade_duration: 0.15  # Video fade duration (keep short)
-```
-
-### Implementation Details
-- Use `concatenate_with_smart_transitions()` for multiple segments
-- `detect_scene_changes_by_image()` identifies same-scene cuts (same image reused)
-- Same-scene cuts can use shorter gaps (0.3s)
-- Scene changes use longer gaps (0.5s)
-
-### What NOT to Do
-- **Don't use `audio_crossfade: true`** - causes speech overlap
-- **Don't fade audio** - it cuts off speech before it finishes
-- **Don't use xfade offset** that overlaps actual content
-
-### Testing Transitions
-```bash
-# Run transition tests
-python tests/test_crossfade_transitions.py
-
-# Test files output to: output/test_transitions/
-```
-
-### Duration Impact
-- Old overlap mode: `total = sum(durations) - transitions` (shorter)
-- Sequential mode: `total = sum(durations) + gaps` (longer, but correct)
-
-## Testing
-
-```bash
-# Syntax check
-python3 -m py_compile src/**/*.py
-
-# Unit tests (requires API keys)
-pytest tests/
-```
-
-## Common Tasks
-
-### Adding a New Provider
-1. Create class inheriting from `BaseProvider` (or specific base)
-2. Implement `health_check()` and main methods
-3. Add `_handle_api_error()` for error conversion
-4. Register in `providers/__init__.py`
-
-### Creating a New Brief
-1. Copy `briefs/example_template.md` or `.yaml`
-2. Fill in key_points (most important)
-3. Set emotional_tone and rhetorical_devices
-4. Run with `--brief ./briefs/your_brief.yaml`
-
-### Debugging Failed Segments
-1. Check `output/<project>/metadata.yaml` for error details
-2. Look at `segment_XX_*.mp4` files for partial outputs
-3. Circuit breaker state in provider logs
+**fal.ai errors?**
+- Check balance: https://fal.ai/dashboard/billing
+- 403 = exhausted balance, need to top up

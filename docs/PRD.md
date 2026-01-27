@@ -7,139 +7,142 @@ Generate automated 1-minute Hebrew educational videos promoting democracy, accou
 
 ## Tech Stack
 
-| Component | Tool | Primary API | Fallback |
-|-----------|------|-------------|----------|
-| **Images** | Nano Banana Pro | Google AI | - |
-| **LLM** | Claude Sonnet 4.5 | Anthropic | Gemini 3.0 |
-| **Audio** | ElevenLabs V3 | ElevenLabs Direct (he) | - |
-| **Image→Video+Lipsync** | VEED Fabric 1.0 | **Fal.ai** | Replicate |
-| **Image→Video** | Kling 2.5 Pro | **Fal.ai** | Replicate |
-| **Video→Video+Lipsync** | sync/lipsync-2-pro | **Fal.ai** | Replicate |
-| **Concatenation** | FFMPEG | Local | - |
-| **Data Validation** | Instructor + Pydantic | Local | - |
+| Component | Tool | API |
+|-----------|------|-----|
+| **Images** | Nano Banana Pro | Google AI |
+| **Audio** | ElevenLabs V3 | ElevenLabs (he) |
+| **Video + Lip-sync** | VEED Fabric 1.0 | Fal.ai |
+| **Concatenation** | FFmpeg | Local |
 
 ---
 
-## Two Workflows
+## The Proper Workflow (6 Steps)
 
-### Workflow 1: Image-Based (~$3.50/video)
 ```
-Input: Topic + Guidelines + Reference Image
-                ↓
-    Claude: Write script → 3 options (A/B test)
-                ↓
-    Claude: Select best → Break into 6-8 segments
-                ↓
-    Claude: Define scenes (camera, lighting, expression per segment)
-                ↓
-    Nano Banana Pro (Google): Generate character images (6-8 settings)
-                ↓
-    ElevenLabs: Generate Hebrew audio per segment
-                ↓
-    VEED Fabric 1.0 (Fal.ai): Image + Audio → Video with lip-sync
-                ↓
-    Claude: Validate quality (remake if needed)
-                ↓
-    FFMPEG: Add subtitles + Concatenate clips
-                ↓
-Output: 1-minute video + thumbnails + metadata
+Step 1: Generate 3 reference images → Select best one
+                    ↓
+Step 2: Use reference to generate 5 scene images → Select best 3
+                    ↓
+Step 3: Prepare text (45-60s) → Split into 3 segments
+                    ↓
+Step 4: ElevenLabs Jessica: serious → urgent → angry
+                    ↓
+Step 5: Fabric 1.0: image + audio → video with lip-sync
+                    ↓
+Step 6: FFmpeg: concatenate with direct cuts
+                    ↓
+Output: Final video (~54 seconds)
 ```
 
-### Workflow 2: Video-Based (~$5-6/video)
-```
-Same as Workflow 1 until audio generation, then:
-                ↓
-    Kling 2.5 Pro (Fal.ai): Image + motion prompt → Video (no audio)
-                ↓
-    sync/lipsync-2-pro (Fal.ai): Video + Audio → Video with lip-sync
-                ↓
-    Continue with validation, subtitles, concatenation
-```
+### Step 1: Generate Reference Images
+- Use Nano Banana Pro (`nano-banana-pro-preview`)
+- Generate **3 potential reference images** of character
+- Select **best one** based on:
+  - Face clarity and definition
+  - Hair consistency/definition
+  - Lip-sync friendliness (clear mouth, no hands near face)
+
+### Step 2: Generate Scene Images WITH Reference
+- **CRITICAL**: Pass reference image to EVERY generation call
+- Generate **5 scene images** at various home settings
+- Ensure face, lighting, character are consistent across all 5
+- Select **best 3** for the 3 video segments:
+  - Segment 1: calm/neutral expression
+  - Segment 2: concerned/urgent expression
+  - Segment 3: intense/angry expression
+
+### Step 3: Prepare Text
+- Write or get full text for 45-60 second video
+- Split into **3 parts** matching emotional arc:
+  - Part 1: Setup/story (~20s)
+  - Part 2: Pivot/question (~20s)
+  - Part 3: Conclusion/CTA (~15s)
+
+### Step 4: Generate Audio
+- Use **ElevenLabs Jessica voice** (`EXAVITQu4vr4xnSDxMaL`)
+- Emotional progression:
+  - Segment 1: `serious` (natural and calm)
+  - Segment 2: `urgent` (intense and emotional)
+  - Segment 3: `angry` (angry and charged)
+
+### Step 5: Generate Videos
+- Use **Fabric 1.0** (`veed/fabric-1.0`) via fal.ai
+- Input: segment image + segment audio
+- Resolution: 720p (or 480p for faster processing)
+- **Note**: ~15 seconds processing per second of audio
+
+### Step 6: Concatenate
+- Use **FFmpeg with direct cuts**
+- No crossfades, no gaps between segments
+- Creates punchy, news-like feel
 
 ---
 
-## Image Generation Strategy
+## Image Generation with Reference
 
-### Challenge
-API rate limits on Nano Banana Pro (Google Imagen 3) restrict individual image generation calls. Generating 6-8 unique images per video hits these limits.
+**The key to face consistency is ALWAYS passing the reference image.**
 
-### Solution: Mosaic + Reuse Pattern
+```python
+from google import genai
+from google.genai import types
 
-**Step 1: Generate 2x3 Mosaic**
-Generate a single 2x3 mosaic image containing 6 character variations in one API call:
-- Same character in different settings/poses
-- Variations: sofa, kitchen, balcony, standing, close-up, side angle
-- Prompt includes "2x3 grid" instruction for consistent layout
+client = genai.Client(api_key=api_key)
+reference_bytes = Path("selected_reference.png").read_bytes()
 
-**Step 2: Split into Individual Images**
-Use PIL/ImageMagick to split the mosaic into 6 separate images programmatically (no API calls).
-
-**Step 3: User Selection**
-Present 6 images to user for selection of best 3 (interactive or config-based).
-
-**Step 4: Segment Reuse Pattern**
-For 5 segments, use pattern `[1, 1, 2, 2, 3]`:
-- Segments 1-2: Image 1 (intro/context)
-- Segments 3-4: Image 2 (middle content)
-- Segment 5: Image 3 (conclusion/CTA)
-
-This provides visual variety while maintaining character consistency.
-
-### Benefits
-| Aspect | Before (Individual) | After (Mosaic) |
-|--------|---------------------|----------------|
-| API calls for 5 segments | 5 | 1 |
-| Rate limit issues | Frequent | Rare |
-| Character consistency | Variable | High (same prompt) |
-| User control | None | Select best 3 from 6 |
-| Cost | ~$0.10 | ~$0.02 |
+response = client.models.generate_content(
+    model="nano-banana-pro-preview",
+    contents=[
+        # Pass reference image FIRST
+        types.Part.from_bytes(data=reference_bytes, mime_type='image/png'),
+        # Then the prompt
+        """Generate a 9:16 image of this SAME woman in a living room.
+        Maintain EXACT same face, hair, features from reference.
+        No hands near face. Professional quality.""",
+    ],
+    config=types.GenerateContentConfig(response_modalities=['image', 'text'])
+)
+```
 
 ---
 
 ## Input/Output
 
 **Input:**
-- Topic (e.g., "government accountability")
-- Angle/Guidelines (e.g., "empathetic, solution-focused")
-- Reference image (optional)
+- Topic or full script text
+- Character description (for reference generation)
 
 **Output:**
-- `./output/{topic}_{timestamp}/`
-  - `video.mp4` (45-75 seconds)
-  - `subtitles.srt` (Hebrew, RTL)
-  - `thumbnails/` (2 best frames)
-  - `metadata.yaml` (A/B tracking)
+- `./output/{project}_{timestamp}/`
+  - `ref_option_1-3.png` (reference options)
+  - `selected_reference.png` (chosen reference)
+  - `scene_1-5.png` (scene variations)
+  - `segment_XX_image.png` (selected for video)
+  - `segment_XX_audio.mp3` (generated audio)
+  - `segment_XX_video.mp4` (lip-sync video)
+  - `final_video.mp4` (concatenated)
 
 ---
 
-## Key Features
+## Cost Breakdown
 
-| Feature | Description |
-|---------|-------------|
-| **A/B Testing** | 3 script options, LLM-as-judge or human selection |
-| **Fast Preview** | 3-4 segments (~$1.50) for direction validation |
-| **Quality Validation** | LLM checks each segment, can order remake |
-| **Hebrew Subtitles** | Customizable font, size, color, background |
-| **Drop-in Providers** | Swap models via config (Claude ↔ Gemini) |
-| **Error Handling** | 2-3 retries, then alert user |
-| **Schema Validation** | Instructor + Pydantic for all LLM outputs |
+| Step | Tool | Estimated Cost |
+|------|------|----------------|
+| Reference Images (3) | Nano Banana Pro | ~$0.03 |
+| Scene Images (5) | Nano Banana Pro | ~$0.05 |
+| Audio (54s) | ElevenLabs | ~$0.30 |
+| Video (54s @ 720p) | VEED Fabric | ~$4.00 |
+| **Total** | | **~$4.40** |
 
 ---
 
-## Cost Breakdown (Workflow 1)
+## API Keys Required
 
-| Step | Tool | Cost (Fal.ai) |
-|------|------|---------------|
-| Images (6-8) | Nano Banana Pro | ~$0.10 |
-| Script + Validation | Claude API | ~$0.10 |
-| Audio (60s) | ElevenLabs | ~$0.30 |
-| Video (50s @ 480p) | VEED Fabric | ~$4.00 ($0.08/sec) |
-| Video (50s @ 720p) | VEED Fabric | ~$7.50 ($0.15/sec) |
-| Subtitles | FFMPEG | FREE |
-| **Total (480p)** | | **~$4.50** |
-| **Total (720p)** | | **~$8.00** |
-
-**Recommendation**: Use 480p for previews/drafts, 720p for final output.
+```bash
+# .env file
+FAL_KEY=               # Video generation (fal.ai)
+ELEVENLABS_API_KEY=    # Hebrew TTS
+GOOGLE_API_KEY=        # Image generation (Nano Banana Pro)
+```
 
 ---
 
@@ -147,69 +150,22 @@ This provides visual variety while maintaining character consistency.
 
 ```
 mind-video/
+├── scripts/
+│   ├── proper_workflow.py    # THE main workflow
+│   └── mini_test_lipsync.py  # Quick testing
 ├── src/
-│   ├── main.py                    # CLI entry point
-│   ├── config.py                  # Settings & API keys
-│   ├── schemas/                   # Pydantic models (Instructor)
-│   │   ├── script.py
-│   │   ├── segment.py
-│   │   ├── scene.py
-│   │   └── validation.py
-│   ├── pipeline/
-│   │   ├── orchestrator.py        # Main coordinator
-│   │   ├── workflow1.py           # Image-based
-│   │   └── workflow2.py           # Video-based
 │   ├── providers/
-│   │   ├── base.py                # Abstract interfaces
-│   │   ├── llm/
-│   │   │   ├── claude.py          # Default
-│   │   │   └── gemini.py          # Drop-in alternative
-│   │   ├── image/
-│   │   │   └── nano_banana.py     # Google AI
-│   │   ├── audio/
-│   │   │   └── elevenlabs.py
-│   │   └── video/
-│   │       ├── base_video.py      # Abstract video interface
-│   │       ├── fal/               # Primary (Fal.ai)
-│   │       │   ├── veed_fabric.py
-│   │       │   ├── kling.py
-│   │       │   └── sync_lipsync.py
-│   │       └── replicate/         # Fallback
-│   │           ├── veed_fabric.py
-│   │           ├── kling.py
-│   │           └── sync_lipsync.py
-│   ├── services/
-│   │   ├── script_generator.py
-│   │   ├── scene_planner.py
-│   │   ├── quality_validator.py
-│   │   └── subtitle_generator.py
+│   │   ├── audio/elevenlabs.py
+│   │   ├── image/nano_banana.py
+│   │   └── video/fal/veed_fabric.py
 │   └── utils/
 │       ├── ffmpeg.py
-│       └── metadata.py
+│       └── video_transitions.py
 ├── docs/
-│   ├── PRD.md
-│   └── tasks.md
-├── tests/
-│   ├── test_providers/
-│   ├── test_services/
-│   └── test_pipeline/
-├── config/
-│   └── default.yaml
-├── output/
-└── requirements.txt
-```
-
----
-
-## API Keys Required
-
-```yaml
-# config/default.yaml or .env
-FAL_API_KEY=...              # Primary: VEED Fabric, Kling, sync
-REPLICATE_API_TOKEN=...      # Fallback: VEED, Kling, sync
-ELEVENLABS_API_KEY=...       # Hebrew TTS (direct)
-ANTHROPIC_API_KEY=...        # Claude (primary LLM)
-GOOGLE_API_KEY=...           # Gemini + Nano Banana Pro
+│   ├── PRD.md                # This file
+│   └── tasks.md              # Implementation tracking
+├── config/default.yaml
+└── output/
 ```
 
 ---
@@ -217,73 +173,36 @@ GOOGLE_API_KEY=...           # Gemini + Nano Banana Pro
 ## CLI Usage
 
 ```bash
-# Single segment test
-python -m src.main test --text "שלום עולם" --image ./ref.png
+# Run full workflow
+python scripts/proper_workflow.py all
 
-# Full video (Workflow 1)
-python -m src.main generate \
-  --topic "government accountability" \
-  --angle "empathetic, solution-focused" \
-  --image ./ref.png \
-  --workflow 1
+# Run step by step
+python scripts/proper_workflow.py 1  # Generate 3 ref images
+python scripts/proper_workflow.py 2  # Generate 5 scenes with ref
+python scripts/proper_workflow.py 3  # Prepare text
+python scripts/proper_workflow.py 4  # Generate audio
+python scripts/proper_workflow.py 5  # Generate videos
+python scripts/proper_workflow.py 6  # Concatenate
 
-# Fast preview
-python -m src.main generate --topic "..." --preview
-
-# Use Gemini instead of Claude
-python -m src.main generate --topic "..." --llm gemini
+# Quick lip-sync test
+python scripts/mini_test_lipsync.py
 ```
-
----
-
-## Why This Tech Stack?
-
-| Service | Direct API | Fal.ai | Replicate | Our Choice |
-|---------|-----------|--------|-----------|------------|
-| **ElevenLabs** | $0.20/1K chars | N/A | N/A | **Direct** (Hebrew voice control) |
-| **VEED Fabric** | Credit-based | **$0.08/sec** | $0.10/sec | **Fal.ai** (cheaper, faster) |
-| **Kling** | $1/10sec, expiring | **$0.07/sec** | $0.09/sec | **Fal.ai** (cheaper, faster) |
-| **sync** | Enterprise | TBD | Pay-as-you-go | **Fal.ai** (fallback: Replicate) |
-
-**Why Fal.ai over Replicate?**
-- **Cheaper**: ~20-30% lower pricing
-- **Faster**: Proprietary inference engine
-- **Growing**: Backed by Sequoia ($4.5B valuation)
-
-**Fallback Strategy**: If Fal.ai has issues, automatically switch to Replicate.
-
-**Note on Subtitles:** We generate subtitles directly from our script text (no transcription needed).
-
----
-
-## Verification Criteria
-
-A task is marked **DONE** only when:
-1. Core functionality works
-2. Edge cases are handled
-3. Error handling is robust
-4. Schema validation passes (Instructor)
-5. Tests pass
 
 ---
 
 ## Future Directions
 
-### Near-term (Post-MVP)
-- **Voice Cloning** - Clone specific Hebrew voices for brand consistency
-- **Multi-Character** - Dialogues between 2+ speakers
-- **Background Music** - Auto-add appropriate music/ambient sounds
-- **Longer Videos** - 2-3 minute educational content
+### Near-term
+- Voice selection (male/female voices)
+- Multi-character dialogues
+- Background music/ambient sounds
 
 ### Medium-term
-- **A/B Dashboard** - Track topic/style performance metrics
-- **Distribution Automation** - Auto-post to YouTube, TikTok, Instagram
-- **Template Library** - Pre-built scene/style templates
-- **Real-time Preview** - Generate preview as script is written
+- A/B testing dashboard
+- Distribution automation (YouTube, TikTok)
+- Template library
 
 ### Long-term
-- **Interactive Videos** - Branching content based on viewer choices
-- **Personalization** - Adapt content to viewer preferences
-- **Multi-Language** - Arabic, Russian, English (Israeli demographics)
-- **Live Streaming** - Real-time AI avatar broadcasts
-- **Analytics Integration** - Connect with platform analytics for optimization
+- Multi-language support (Arabic, Russian, English)
+- Interactive branching videos
+- Real-time AI avatar streaming

@@ -26,10 +26,10 @@ audio:
 video:
   primary_provider: fal
   fallback_provider: replicate
-  resolution: 480p  # Options: 480p, 720p (720p is ~88% more expensive but better quality)
+  resolution: 720p  # Options: 480p, 720p (720p is better quality for final output)
   max_retries: 3
-  poll_interval: 5
-  timeout: 300
+  poll_interval: 10  # Reduced from 5s to reduce API calls
+  timeout: 600  # Increased from 300s to handle slower fal.ai queues
 
   # Model identifiers
   veed_model: veed/fabric-1.0
