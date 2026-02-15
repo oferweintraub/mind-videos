@@ -1,3 +1,5 @@
+> **FIRST ACTION EVERY SESSION**: Run `Read lessons.md` before any other work. Then read `TASKS.md` for current status.
+
 # Mind Video - Hebrew Democracy Video Pipeline
 
 ## Project Overview
@@ -6,18 +8,33 @@ Automated pipeline for generating 1-minute Hebrew educational videos promoting d
 
 ## Tech Stack
 
+### Production Pipeline (Photorealistic)
 | Component | Provider | API |
 |-----------|----------|-----|
 | Images | Nano Banana Pro | Google AI |
-| Audio/TTS | ElevenLabs V3 | ElevenLabs (he) |
+| Audio/TTS | ElevenLabs V3 / Kokoro TTS | ElevenLabs (he) / Node.js (en) |
 | Video + Lip-sync | VEED Fabric 1.0 | Fal.ai |
 | Concatenation | FFmpeg | Local |
+
+### Stylized Characters (Puppets, Comics, Cartoons)
+| Style | Image Model | fal.ai ID |
+|-------|-----------|-----------|
+| Puppet/Muppet | FLUX LoRA (train custom) | `fal-ai/flux-lora-fast-training` ($2 train) |
+| Comic | FLUX Digital Comic Art | `fal-ai/flux-2-lora-gallery/digital-comic-art` |
+| Cartoon (Pixar) | Cartoonify | `fal-ai/cartoonify` |
+| Cartoon (Ghibli) | Ghiblify | `fal-ai/ghiblify` |
+| Any + consistency | FLUX Kontext Pro | `fal-ai/flux-pro/kontext` |
+| Character gen | Instant Character | `fal-ai/instant-character` |
+
+**Video pipeline for all styles:** VEED Fabric 1.0 (confirmed works with stylized input)
 
 ## Project Structure
 
 ```
 scripts/
 ├── proper_workflow.py      # THE main workflow (use this)
+├── realism_test.py         # Model combo comparison (8 combos)
+├── kokoro_tts.js           # Node.js bridge for Kokoro TTS (English)
 ├── regenerate_videos.py    # Asset reuse (new character, same audio)
 └── mini_test_lipsync.py    # Quick test for debugging
 

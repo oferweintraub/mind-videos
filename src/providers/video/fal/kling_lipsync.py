@@ -1,7 +1,10 @@
-"""Sync lipsync-2-pro provider using Fal.ai."""
+"""Kling Avatar v2 video provider using Fal.ai.
 
-import base64
+Generates talking-head video from image + audio in a single step.
+"""
+
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -23,14 +26,14 @@ from ..base_video import (
 logger = logging.getLogger(__name__)
 
 
-class SyncLipsyncFalProvider(ExtendedVideoProvider):
-    """Sync lipsync-2-pro via Fal.ai.
+class KlingAvatarFalProvider(ExtendedVideoProvider):
+    """Kling Avatar v2 via Fal.ai.
 
-    Adds lip-sync to an existing video using audio.
-    Used in Workflow 2 after Kling video generation.
+    Single-step image+audio → talking-head video.
+    Uses fal-ai/kling-video/ai-avatar/v2/standard.
     """
 
-    DEFAULT_MODEL = "fal-ai/sync-lipsync/v2"
+    DEFAULT_MODEL = "fal-ai/kling-video/ai-avatar/v2/standard"
 
     def __init__(
         self,
@@ -43,7 +46,7 @@ class SyncLipsyncFalProvider(ExtendedVideoProvider):
         timeout: float = 60.0,
     ):
         super().__init__(
-            name="fal_sync_lipsync",
+            name="fal_kling_avatar",
             api_key=api_key,
             model_id=model_id or self.DEFAULT_MODEL,
             resolution=resolution,
@@ -52,31 +55,22 @@ class SyncLipsyncFalProvider(ExtendedVideoProvider):
             retry_config=retry_config,
             timeout=timeout,
         )
+        os.environ["FAL_KEY"] = api_key
         fal_client.api_key = api_key
 
-    def _encode_media(self, data: bytes, media_type: str) -> str:
-        """Encode bytes as data URI."""
-        b64_data = base64.b64encode(data).decode("utf-8")
-        return f"data:{media_type};base64,{b64_data}"
-
     def _handle_api_error(self, error: Exception) -> None:
-        """Convert Fal.ai errors to provider errors."""
         error_str = str(error).lower()
-
         if "401" in error_str or "unauthorized" in error_str:
             raise AuthenticationError("Invalid Fal.ai API key", self.name)
-
         if "429" in error_str or "rate limit" in error_str:
             raise RateLimitError("Fal.ai rate limit exceeded", self.name, retry_after=60.0)
-
         raise ProviderError(str(error), self.name)
 
     async def health_check(self) -> bool:
-        """Check if Fal.ai sync is accessible."""
         try:
             return True
         except Exception as e:
-            logger.error(f"Sync Fal.ai health check failed: {e}")
+            logger.error(f"Kling Avatar health check failed: {e}")
             return False
 
     async def _submit_job(
@@ -87,23 +81,17 @@ class SyncLipsyncFalProvider(ExtendedVideoProvider):
         duration: Optional[float] = None,
         **kwargs,
     ) -> str:
-        """Submit a lip-sync job to Fal.ai.
-
-        Note: For sync, 'image' is actually video bytes.
-        """
+        """Submit avatar generation: image + audio → talking-head video."""
         try:
-            # Get video from kwargs or use image param as video
-            video_bytes = kwargs.get("video", image)
-            video_uri = self._encode_media(video_bytes, "video/mp4")
-
             if audio is None:
-                raise ProviderError("Audio is required for lip-sync", self.name)
+                raise ProviderError("Audio is required for Kling Avatar", self.name)
 
-            audio_uri = self._encode_media(audio, "audio/mpeg")
+            image_url = await fal_client.upload_async(image, content_type="image/png")
+            audio_url = await fal_client.upload_async(audio, content_type="audio/mpeg")
 
             payload = {
-                "video_url": video_uri,
-                "audio_url": audio_uri,
+                "image_url": image_url,
+                "audio_url": audio_url,
             }
 
             handle = await fal_client.submit_async(
@@ -119,7 +107,6 @@ class SyncLipsyncFalProvider(ExtendedVideoProvider):
             self._handle_api_error(e)
 
     async def _check_job_status(self, job_id: str) -> VideoJobResult:
-        """Check status of a Fal.ai sync job."""
         try:
             status = await fal_client.status_async(
                 self.model_id,
@@ -127,21 +114,18 @@ class SyncLipsyncFalProvider(ExtendedVideoProvider):
                 with_logs=True,
             )
 
-            if status.status == "COMPLETED":
+            if isinstance(status, fal_client.Completed):
                 result = await fal_client.result_async(self.model_id, job_id)
 
                 video_url = None
                 duration = None
 
-                if hasattr(result, "video") and result.video:
-                    video_url = result.video.url if hasattr(result.video, "url") else result.video
-                elif isinstance(result, dict):
+                if isinstance(result, dict):
                     video_url = result.get("video", {}).get("url") or result.get("video_url")
-
-                if hasattr(result, "duration"):
-                    duration = result.duration
-                elif isinstance(result, dict):
                     duration = result.get("duration")
+                elif hasattr(result, "video") and result.video:
+                    video_url = result.video.url if hasattr(result.video, "url") else result.video
+                    duration = getattr(result, "duration", None)
 
                 return VideoJobResult(
                     job_id=job_id,
@@ -151,23 +135,23 @@ class SyncLipsyncFalProvider(ExtendedVideoProvider):
                     metadata={"raw_result": result if isinstance(result, dict) else {}},
                 )
 
-            elif status.status == "FAILED":
+            elif hasattr(status, "error") and status.error:
                 return VideoJobResult(
                     job_id=job_id,
                     status=VideoStatus.FAILED,
-                    error_message=str(getattr(status, "error", "Unknown error")),
+                    error_message=str(status.error),
                 )
 
-            elif status.status == "IN_QUEUE":
+            elif isinstance(status, fal_client.Queued):
                 return VideoJobResult(job_id=job_id, status=VideoStatus.PENDING)
 
-            return VideoJobResult(job_id=job_id, status=VideoStatus.PROCESSING)
+            else:
+                return VideoJobResult(job_id=job_id, status=VideoStatus.PROCESSING)
 
         except Exception as e:
             self._handle_api_error(e)
 
     async def _download_video(self, video_url: str) -> bytes:
-        """Download video from Fal.ai CDN."""
         try:
             client = await self.get_http_client()
             response = await client.get(video_url)
@@ -175,32 +159,6 @@ class SyncLipsyncFalProvider(ExtendedVideoProvider):
             return response.content
         except Exception as e:
             raise ProviderError(f"Failed to download video: {e}", self.name)
-
-    async def add_lipsync(
-        self,
-        video: bytes,
-        audio: bytes,
-        output_path: Optional[Path] = None,
-        **kwargs,
-    ) -> tuple[bytes, dict]:
-        """Add lip-sync to an existing video.
-
-        Args:
-            video: Input video bytes
-            audio: Audio bytes to sync
-            output_path: Optional path to save video
-
-        Returns:
-            Tuple of (video_bytes, metadata_dict)
-        """
-        # Use generate_video with video passed as kwargs
-        return await self.generate_video(
-            image=video,  # Pass video as image (will be handled in _submit_job)
-            audio=audio,
-            output_path=output_path,
-            video=video,  # Also pass explicitly
-            **kwargs,
-        )
 
     async def generate_video(
         self,
@@ -211,13 +169,11 @@ class SyncLipsyncFalProvider(ExtendedVideoProvider):
         output_path: Optional[Path] = None,
         **kwargs,
     ) -> tuple[bytes, dict]:
-        """Generate lip-synced video.
-
-        For sync provider, 'image' is treated as video input.
+        """Generate talking-head video from image + audio.
 
         Args:
-            image: Video bytes (not image for this provider)
-            audio: Audio bytes for lip-sync (required)
+            image: Input face image bytes
+            audio: Audio bytes (required)
             motion_prompt: Ignored
             duration: Ignored (determined by audio)
             output_path: Optional path to save video
@@ -226,7 +182,7 @@ class SyncLipsyncFalProvider(ExtendedVideoProvider):
             Tuple of (video_bytes, metadata_dict)
         """
         if audio is None:
-            raise ProviderError("Audio is required for lip-sync", self.name)
+            raise ProviderError("Audio is required for Kling Avatar", self.name)
 
         return await super().generate_video(
             image=image,

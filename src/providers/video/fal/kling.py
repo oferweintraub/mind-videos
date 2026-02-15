@@ -30,7 +30,7 @@ class KlingFalProvider(ExtendedVideoProvider):
     Used in Workflow 2 before lip-sync overlay.
     """
 
-    DEFAULT_MODEL = "fal-ai/kling-video/v2.5/pro"
+    DEFAULT_MODEL = "fal-ai/kling-video/v2.1/standard/image-to-video"
 
     def __init__(
         self,
