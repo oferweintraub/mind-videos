@@ -249,13 +249,17 @@ class ElevenLabsProvider(BaseAudioProvider):
             )
 
             # convert() returns AsyncIterator directly (not a coroutine)
-            audio_generator = self.client.text_to_speech.convert(
+            # language_code is only supported by some models (e.g. eleven_v3),
+            # NOT by eleven_multilingual_v2 (used for cloned voices)
+            kwargs = dict(
                 voice_id=voice_id,
                 model_id=self.model_id,
                 text=text,
                 voice_settings=voice_settings,
-                language_code=self.language_code,  # Specify Hebrew
             )
+            if self.language_code:
+                kwargs["language_code"] = self.language_code
+            audio_generator = self.client.text_to_speech.convert(**kwargs)
 
             # Collect all audio chunks
             audio_chunks = []
