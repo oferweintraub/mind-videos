@@ -27,6 +27,8 @@ Automated pipeline for generating 1-minute Hebrew educational videos promoting d
 | Character gen | Instant Character | `fal-ai/instant-character` |
 
 **Video pipeline for all styles:** VEED Fabric 1.0 (confirmed works with stylized input)
+**Backup lip-sync:** Aurora by Creatify (`fal-ai/creatify/aurora`, $0.10/s) — slightly better expressiveness but 2x slower and 25% pricier. Use only if VEED is down.
+**Benchmarked & rejected:** LatentSync, Sync Lipsync 1.9, MuseTalk (poor quality); Kling Avatar v2 (less sharp); OmniHuman v1.5 (too slow). See `scripts/compare_lipsync.py`.
 
 ## Project Structure
 
@@ -36,6 +38,7 @@ scripts/
 ├── realism_test.py         # Model combo comparison (8 combos)
 ├── kokoro_tts.js           # Node.js bridge for Kokoro TTS (English)
 ├── regenerate_videos.py    # Asset reuse (new character, same audio)
+├── compare_lipsync.py      # Lip-sync provider benchmark (8 providers tested)
 └── mini_test_lipsync.py    # Quick test for debugging
 
 src/

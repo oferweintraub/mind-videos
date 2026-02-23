@@ -99,7 +99,7 @@ Hebrew puppet satire — Bibi claims total ignorance of Oct 7 while Kisch & Silm
 
 **Script:** `scripts/episode1_produce.py` (full production pipeline)
 **Output:** `output/episode1/`
-**Current version:** v4.1 — `output/episode1/final.mp4` (2:53, 49.4MB, 23 scenes)
+**Current version:** v4.3 — `output/episode1/final.mp4` (2:49, 48.0MB, 23 scenes)
 
 | Step | Command | Count | Status |
 |------|---------|-------|--------|
@@ -109,13 +109,15 @@ Hebrew puppet satire — Bibi claims total ignorance of Oct 7 while Kisch & Silm
 | 4. Reaction stills | `stills` | 1 (scene 3 react) | DONE |
 | 5. Concatenate | `concat` | 23 scenes → final.mp4 | DONE |
 
-**Iterations completed:** v1 (3:28) → v2 (2:58) → v3 (2:54) → v4 (2:55) → v4.1 (2:53)
+**Iterations completed:** v1 (3:28) → v2 (2:58) → v3 (2:54) → v4 (2:55) → v4.1 (2:53) → v4.2 (2:53) → v4.3 (2:49)
 
 **Key changes across versions:**
 - v2: Bibi 1.2x tempo, scene 10 split into 10/10b/10c, pronunciation fixes
 - v3: New phone text, removed pink glasses + group shot, new silman_silly/kisch_serious
 - v4: ALL images regenerated with character references for consistency, text fixes (scenes 16-19)
 - v4.1: Pronunciation fixes (אַחֲרַי niqqud, stronger intonation, removed הסחבק)
+- v4.2: Full niqqud for "בדש" phrase (didn't help enough)
+- v4.3: Replaced "בדש" line entirely → "למה לא העירו אותי? תגידו, זה משהו שינון יכול להריץ עליו איזה קונספירציה ונגמור עם זה?"
 
 **Voice IDs (updated):**
 - Bibi: `aooUHbQzVbqHLJx3zbYH` (re-cloned with generic name to avoid ElevenLabs ToS block)
@@ -130,10 +132,44 @@ Hebrew puppet satire — Bibi claims total ignorance of Oct 7 while Kisch & Silm
 **Run:** `python scripts/episode1_produce.py all` or step by step.
 **Status:** `python scripts/episode1_produce.py status`
 
-**Current status:** v4.1 delivered, awaiting user review for potential further tweaks.
+**Current status:** v4.3 delivered. Main remaining challenge: Hebrew TTS pronunciation and emotional intonation. Speech-to-speech is the likely next approach.
+
+---
+
+### [DONE] Lip-Sync Provider Comparison (2026-02-23)
+
+Benchmarked 8 fal.ai lip-sync providers against Hebrew audio to find a cheaper or better alternative to VEED Fabric 1.0. Tested on both photorealistic images (20.6s) and puppet Bibi (11.4s short + 25.4s long Hebrew monologue).
+
+**Round 1:** VEED Fabric vs LatentSync (photorealistic)
+**Round 2:** + Kling Avatar v2 Std, Sync Lipsync 1.9, MuseTalk (photorealistic)
+**Round 3:** VEED Fabric vs Kling Avatar v2 Std vs Kling Avatar v2 Pro (photorealistic)
+**Round 4:** VEED vs Kling Std on puppet Bibi (11.4s)
+**Round 5:** + OmniHuman v1.5, Aurora (Creatify) on puppet Bibi (11.4s)
+**Round 6:** VEED vs Aurora vs OmniHuman on puppet Bibi long sentence (25.4s) — **final showdown**
+
+| Provider | Model ID | $/sec | Quality | Speed | Verdict |
+|----------|----------|-------|---------|-------|---------|
+| **VEED Fabric 480p** | `veed/fabric-1.0` | **$0.08** | Crisp, sharp | **~100s** | **WINNER — best balance** |
+| Aurora (Creatify) | `fal-ai/creatify/aurora` | $0.10 | Good + hand movements | ~210s | **Backup option** |
+| Kling Avatar v2 Std | `fal-ai/kling-video/ai-avatar/v2/standard` | $0.056 | Human nuances, less sharp | ~300s | Interesting but slower |
+| Kling Avatar v2 Pro | `fal-ai/kling-video/ai-avatar/v2/pro` | $0.115 | Small bump over Std | ~500s | Not worth 2x cost |
+| OmniHuman v1.5 | `fal-ai/bytedance/omnihuman/v1.5` | $0.16 | Nice micro-expressions | Unreliable | Timed out on 25s clip |
+| Sync Lipsync 1.9 | `fal-ai/sync-lipsync` | $0.012/s | Poor | ~218s | Not viable |
+| MuseTalk | `fal-ai/musetalk` | Free | Poor | ~376s | Not viable |
+| LatentSync | `fal-ai/latentsync` | $0.20 flat | Unusable | ~356s | Rejected |
+
+**Also investigated (not tested):**
+- Kling O1 — no audio/lip-sync support, video gen only
+- Google Veo 3.1 — text-to-video only, can't feed existing audio+image
+
+**Final verdict:** VEED Fabric 1.0 confirmed as the best choice. Aurora is a quality backup if VEED has issues. No provider change needed — cost optimization should focus on content (shorter segments, fewer segments) not provider switching.
+
+**Script:** `scripts/compare_lipsync.py`
+**Output:** `output/lipsync_comparison/` (photorealistic, puppet_bibi, puppet_bibi_long)
 
 ---
 
 ## Pending
 
+- **Investigate speech-to-speech for Hebrew TTS**: ElevenLabs TTS struggles with Hebrew pronunciation and emotional delivery. Record human reading lines → convert to cloned voice via speech-to-speech. Check ElevenLabs S2S API or alternatives.
 - **[BLOCKED — waiting for fal.ai support] Seedance 2.0 by ByteDance**: Native multimodal video gen with built-in lip-sync. Official API launches ~Feb 24. Check fal.ai for `fal-ai/bytedance/seedance/v2` after Feb 24.
