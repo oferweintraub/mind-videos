@@ -132,7 +132,13 @@ Hebrew puppet satire — Bibi claims total ignorance of Oct 7 while Kisch & Silm
 **Run:** `python scripts/episode1_produce.py all` or step by step.
 **Status:** `python scripts/episode1_produce.py status`
 
-**Current status:** v4.3 delivered. Main remaining challenge: Hebrew TTS pronunciation and emotional intonation. Speech-to-speech is the likely next approach.
+**Current status:** v4.3 delivered (ElevenLabs TTS). Next step: re-record all 22 lines as human recordings → convert via Chatterbox S2S → regenerate videos for v5 with better pronunciation/emotion.
+
+**S2S pipeline ready:** `scripts/episode1_s2s.py`
+- `list` — shows all 22 lines to record with status
+- `convert` — converts recordings in `output/episode1/recordings/` via Chatterbox S2S
+- Uses `fal-ai/chatterbox/speech-to-speech` with clip2 reference per character
+- After convert: `python scripts/episode1_produce.py video && python scripts/episode1_produce.py concat`
 
 ---
 
@@ -169,7 +175,24 @@ Benchmarked 8 fal.ai lip-sync providers against Hebrew audio to find a cheaper o
 
 ---
 
+### [DONE] S2S Investigation: Chatterbox Wins (2026-02-19)
+
+Tested 3 speech-to-speech providers for Hebrew voice conversion:
+
+| Provider | Model | Hebrew Support | Result |
+|----------|-------|---------------|--------|
+| **Chatterbox (fal.ai)** | `fal-ai/chatterbox/speech-to-speech` | **Yes (language-agnostic)** | **WINNER — best voice conversion quality** |
+| ElevenLabs STS | `eleven_multilingual_sts_v2` | No | Passes audio through unchanged for Hebrew |
+| Resemble AI S2S | `POST /synthesize` with `<resemble:convert>` | Yes | Works but lower quality than Chatterbox |
+
+**Key finding:** Chatterbox is language-agnostic (converts voice timbre, preserves delivery/pronunciation). ElevenLabs STS does NOT support Hebrew — outputs identical audio regardless of settings. Resemble AI works but voice creation via API requires Business plan ($$$).
+
+**Script:** `scripts/episode1_s2s.py` (ready to use)
+**Test outputs:** `output/episode1/test_chatterbox_clip{1,2,3}.wav`, `test_resemble_harel.mp3`
+
+---
+
 ## Pending
 
-- **Investigate speech-to-speech for Hebrew TTS**: ElevenLabs TTS struggles with Hebrew pronunciation and emotional delivery. Record human reading lines → convert to cloned voice via speech-to-speech. Check ElevenLabs S2S API or alternatives.
+- **Record 22 lines for S2S conversion**: Record all speaking lines with correct Hebrew pronunciation and emotion → save to `output/episode1/recordings/` → run `python scripts/episode1_s2s.py convert` → regenerate videos for v5
 - **[BLOCKED — waiting for fal.ai support] Seedance 2.0 by ByteDance**: Native multimodal video gen with built-in lip-sync. Official API launches ~Feb 24. Check fal.ai for `fal-ai/bytedance/seedance/v2` after Feb 24.
