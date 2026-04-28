@@ -58,14 +58,29 @@ DEFAULT_CAST = ["Female anchor (Channel 14)", "Male anchor (Channel 14)", "Eden 
 # --- Environment checks -------------------------------------------------------
 
 def _preflight():
-    missing = [k for k in ["FAL_KEY", "ELEVENLABS_API_KEY", "GOOGLE_API_KEY"]
-               if not os.environ.get(k)]
+    # Only FAL_KEY + ELEVENLABS_API_KEY are required for the UI flow —
+    # character images are pinned in examples/ so we don't call Nano Banana.
+    # GOOGLE_API_KEY is only needed if you regen images via the CLI scripts.
+    required = ["FAL_KEY", "ELEVENLABS_API_KEY"]
+    missing = [k for k in required if not os.environ.get(k)]
     if missing:
         st.error(f"Missing API keys in .env: **{', '.join(missing)}**. "
                  f"Edit `{ROOT/'.env'}` and restart.")
         st.stop()
+    if not os.environ.get("GOOGLE_API_KEY"):
+        st.caption(":grey[Note: GOOGLE_API_KEY not set — character images are pinned, "
+                   "so this is fine. Only needed if you regenerate images via the CLI.]")
     if not shutil.which("ffmpeg"):
         st.error("`ffmpeg` not found on $PATH. Install with `brew install ffmpeg`.")
+        st.stop()
+    import subprocess
+    probe = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
+    if probe.returncode != 0:
+        st.error(
+            "`ffmpeg` is installed but broken (likely a homebrew library mismatch). "
+            "Stderr:\n```\n" + probe.stderr.strip().splitlines()[0] + "\n```\n"
+            "Try: `brew reinstall ffmpeg`"
+        )
         st.stop()
     for ch, cfg in CHARACTERS.items():
         if not Path(cfg["image"]).exists():

@@ -28,14 +28,17 @@ Two finished examples ship in [`examples/`](examples/):
 
 ### 2.1 Prerequisites
 - Python 3.10+
-- **FFmpeg** on `$PATH` (`brew install ffmpeg` on macOS)
-- Three API keys with paid balance:
+- **FFmpeg** on `$PATH`
+  - macOS: `brew install ffmpeg`
+  - Linux (Debian/Ubuntu): `sudo apt install ffmpeg`
+  - Windows: download from https://ffmpeg.org/download.html and add to PATH
+- API keys:
 
-| Service | Purpose | Get key |
-|---------|---------|---------|
-| **fal.ai** | VEED Fabric 1.0 lip-sync (and Aurora fallback) | https://fal.ai/dashboard/keys |
-| **ElevenLabs** | Hebrew TTS (`eleven_v3` model with `language_code='he'`) | https://elevenlabs.io/app/settings/api-keys |
-| **Google AI Studio** | Nano Banana Pro image generation | https://aistudio.google.com/app/apikey |
+| Service | Required for | Notes |
+|---------|--------------|-------|
+| **fal.ai** ([key](https://fal.ai/dashboard/keys)) | VEED Fabric 1.0 lip-sync (and Aurora fallback) | **Paid balance required** — the Free tier returns 403. Top up ~$10 on https://fal.ai/dashboard/billing |
+| **ElevenLabs** ([key](https://elevenlabs.io/app/settings/api-keys)) | Hebrew TTS via `eleven_v3` + `language_code='he'` | **`eleven_v3` requires Creator plan or higher** ($22/mo). Free-tier accounts get 403 on this model |
+| **Google AI Studio** ([key](https://aistudio.google.com/app/apikey)) | Nano Banana Pro image generation | **Optional** — only needed if you regenerate character images via `scripts/fix_v2.py`. The Streamlit UI uses pinned images from `examples/` and works without this key |
 
 ### 2.2 Install
 ```bash
