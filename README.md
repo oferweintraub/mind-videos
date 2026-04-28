@@ -62,6 +62,19 @@ Each script is **idempotent** — it skips any image/audio/video that already ex
 
 **Cost per ~30s episode**: ~$3-5 (most of it is VEED Fabric at $0.08/s × 30s × 3-5 segments).
 
+### 2.5 Local UI (recommended for non-CLI users)
+```bash
+streamlit run app.py
+```
+A browser tab opens at `http://localhost:8501` with an episode builder:
+- 3 default segments pre-loaded (♀ anchor → ♂ anchor → Eden) with their pinned character images for visual consistency.
+- Edit Hebrew text per segment (RTL textareas), add/remove segments, see a live cost estimate.
+- Click **▶ Generate video** to watch real-time progress for each segment (image ✓ / audio ✓ / lip-sync ⟳ with elapsed seconds).
+- When done, the final MP4 plays inline + a **⬇ Download** button. The output path is `output/<episode-name>/final.mp4`.
+- Re-clicking Generate with the same episode name reuses cached steps — cheap iteration on a single line.
+
+The UI uses the same shared functions in `src/pipeline/episode.py` as the CLI scripts, so anything you build there is reproducible from the command line.
+
 ---
 
 ## 3. The Channel 14 + Eden format
