@@ -78,6 +78,40 @@ A browser tab opens at `http://localhost:8501` with an episode builder:
 
 The UI uses the same shared functions in `src/pipeline/episode.py` as the CLI scripts, so anything you build there is reproducible from the command line.
 
+### 2.6 Deploy on Streamlit Community Cloud (free)
+
+For a hosted version your collaborators can use from a browser without installing anything:
+
+1. **Push the repo to GitHub** (already done if you're reading this).
+2. Sign in at https://share.streamlit.io with your GitHub account.
+3. **New app** → pick this repo, branch `master`, main file `app.py`.
+4. **Advanced settings → Secrets**: paste a TOML block with two values:
+   ```toml
+   APP_PASSWORD = "pick-a-shared-password-here"
+   ```
+   (Optionally also `FAL_KEY`, `ELEVENLABS_API_KEY`, `GOOGLE_API_KEY` if you want the app to work without users pasting their own — *but be aware: anyone with the password and URL will spend your fal.ai balance*.)
+5. Click **Deploy**. Streamlit Cloud installs `ffmpeg` from `packages.txt` and Python deps from `requirements.txt` automatically. First boot takes ~3 minutes.
+6. Share the URL + password with collaborators.
+
+**What collaborators see**:
+- Locked password screen first
+- After login: a sidebar asks for their own fal.ai + ElevenLabs keys (with links to get them)
+- Main panel: the same episode builder as local
+
+**Two layers of protection**:
+- **Password gate** — keeps strangers out of the app entirely.
+- **Bring-your-own-keys** — even if a collaborator misuses the app, they spend their own fal.ai balance, not yours.
+
+**Tier reminders**:
+- fal.ai needs paid balance (~$10 minimum top-up)
+- ElevenLabs `eleven_v3` requires Creator plan ($22/mo) or higher
+
+**Limits of Streamlit Cloud free tier**:
+- App sleeps after ~7 days of inactivity (cold start ~30s)
+- 1 GB RAM (fine for this — no heavy CPU work, the heavy lifting is in fal.ai/ElevenLabs)
+- Filesystem is ephemeral — generated MP4s are gone on app restart, so users should download immediately
+- 1 private app on free tier (this is the one)
+
 ---
 
 ## 3. The Channel 14 + Eden format

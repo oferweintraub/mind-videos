@@ -55,31 +55,83 @@ CHARACTERS = {
 DEFAULT_CAST = ["Female anchor (Channel 14)", "Male anchor (Channel 14)", "Eden (the kid)"]
 
 
+# --- Auth gate (shared password) ---------------------------------------------
+
+def _expected_password():
+    """Read APP_PASSWORD from Streamlit secrets, falling back to env. Returns None if unset."""
+    try:
+        return st.secrets["APP_PASSWORD"]
+    except Exception:
+        return os.environ.get("APP_PASSWORD")
+
+
+def _gate():
+    expected = _expected_password()
+    if not expected:
+        # No password configured — local dev mode, skip gate.
+        return
+    if st.session_state.get("authed"):
+        return
+    st.title("🔒 Mind Video")
+    st.caption("Enter password to continue")
+    pw = st.text_input("Password", type="password", label_visibility="collapsed")
+    if st.button("Enter", type="primary", disabled=not pw):
+        if pw == expected:
+            st.session_state.authed = True
+            st.rerun()
+        else:
+            st.error("Wrong password")
+    st.stop()
+
+
+# --- Bring-your-own-keys sidebar ---------------------------------------------
+
+def _init_keys():
+    """Sidebar with three password inputs. Sets os.environ for the pipeline."""
+    with st.sidebar:
+        st.header("🔑 API Keys")
+        st.caption(
+            "Your keys stay in your browser session — they're never logged or stored. "
+            "Get them at:"
+        )
+        st.markdown(
+            "- [fal.ai](https://fal.ai/dashboard/keys) — needs paid balance\n"
+            "- [ElevenLabs](https://elevenlabs.io/app/settings/api-keys) — needs Creator+ plan\n"
+            "- [Google AI Studio](https://aistudio.google.com/app/apikey) — *optional*"
+        )
+        for k in ("FAL_KEY", "ELEVENLABS_API_KEY", "GOOGLE_API_KEY"):
+            default = os.environ.get(k, "")
+            v = st.text_input(
+                k,
+                value=st.session_state.get(f"_key_{k}", default),
+                type="password",
+                key=f"_key_{k}",
+            )
+            if v:
+                os.environ[k] = v
+        if st.button("Sign out"):
+            st.session_state.clear()
+            st.rerun()
+
+
 # --- Environment checks -------------------------------------------------------
 
 def _preflight():
-    # Only FAL_KEY + ELEVENLABS_API_KEY are required for the UI flow —
-    # character images are pinned in examples/ so we don't call Nano Banana.
-    # GOOGLE_API_KEY is only needed if you regen images via the CLI scripts.
-    required = ["FAL_KEY", "ELEVENLABS_API_KEY"]
-    missing = [k for k in required if not os.environ.get(k)]
+    missing = [k for k in ("FAL_KEY", "ELEVENLABS_API_KEY") if not os.environ.get(k)]
     if missing:
-        st.error(f"Missing API keys in .env: **{', '.join(missing)}**. "
-                 f"Edit `{ROOT/'.env'}` and restart.")
+        st.warning(
+            f"Add your **{', '.join(missing)}** in the sidebar (←) to start generating."
+        )
         st.stop()
-    if not os.environ.get("GOOGLE_API_KEY"):
-        st.caption(":grey[Note: GOOGLE_API_KEY not set — character images are pinned, "
-                   "so this is fine. Only needed if you regenerate images via the CLI.]")
     if not shutil.which("ffmpeg"):
-        st.error("`ffmpeg` not found on $PATH. Install with `brew install ffmpeg`.")
+        st.error("`ffmpeg` not found on $PATH.")
         st.stop()
     import subprocess
     probe = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
     if probe.returncode != 0:
         st.error(
-            "`ffmpeg` is installed but broken (likely a homebrew library mismatch). "
-            "Stderr:\n```\n" + probe.stderr.strip().splitlines()[0] + "\n```\n"
-            "Try: `brew reinstall ffmpeg`"
+            "`ffmpeg` is installed but broken. Stderr:\n```\n"
+            + probe.stderr.strip().splitlines()[0] + "\n```"
         )
         st.stop()
     for ch, cfg in CHARACTERS.items():
@@ -297,6 +349,8 @@ def render_done():
 
 # --- Main ---------------------------------------------------------------------
 
+_gate()
+_init_keys()
 _preflight()
 _init_state()
 
