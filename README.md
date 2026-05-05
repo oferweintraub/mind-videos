@@ -1,16 +1,14 @@
-# Mind Video — Hebrew Animated Video Pipeline
+# Mind Video — Hebrew satirical video pipeline
 
-End-to-end pipeline for producing short (≈30-60s) animated talking-character videos. Designed to be **driven from inside Claude Code or Claude Cowork** via three slash commands — no Python knowledge required to operate it.
+Turn a few lines of Hebrew dialogue into a finished 9:16 video where animated characters speak with lip-synced mouths. Driven from inside Claude Desktop with three slash commands. **No coding required.**
 
 ```
-/new-character  →  generate 3 candidate stills, pick one, save it to the library
-/new-script     →  draft a Hebrew dialogue across N characters into a script.md
-/make-video     →  render that script.md to final.mp4 (TTS + lip-sync + concat)
+/new-character   → design a new character (3 candidate images, pick one)
+/new-script      → draft Hebrew dialogue across N characters
+/make-video      → render the script into a finished MP4
 ```
 
-The pipeline orchestrates three external services: **Google Nano Banana Pro** (images), **ElevenLabs v3** (Hebrew TTS), and **VEED Fabric 1.0** on fal.ai (lip-sync), then stitches with **FFmpeg**.
-
-Two finished examples ship in [`examples/`](examples/) — both produced from this exact pipeline:
+Two finished examples in [`examples/`](examples/) — both produced from this exact pipeline:
 
 | File | Format | Duration |
 |------|--------|----------|
@@ -19,194 +17,242 @@ Two finished examples ship in [`examples/`](examples/) — both produced from th
 
 ---
 
-## 1. Quick start (5 minutes)
+## What you'll need
 
-### 1.1 Clone + install
+A one-time setup of about **30 minutes**. After that, each new video is 5–15 minutes of clicking and ~$1–3 in API credits.
+
+| Need | Where to get it | Cost |
+|------|-----------------|------|
+| Mac or Windows computer | – | – |
+| Claude Desktop | [claude.com/download](https://claude.com/download) | Free download (Pro plan recommended) |
+| Three API keys | see [Step 3](#step-3--get-your-three-api-keys) | ~$30 to start |
+| Three command-line tools (`git`, `python`, `ffmpeg`) | see [Step 2](#step-2--install-the-prerequisites) | Free |
+
+---
+
+## Step 1 — Install Claude Desktop
+
+1. Go to **[https://claude.com/download](https://claude.com/download)** in your browser.
+2. Click **Download for macOS** (or Windows).
+3. Open the downloaded file. On Mac, drag Claude into your Applications folder.
+4. Launch Claude. Sign in with your Anthropic account (Pro plan recommended).
+
+Once it opens you'll see tabs at the top: **Chat**, **Cowork**, **Code**. We'll use the **Code** tab for everything below.
+
+---
+
+## Step 2 — Install the prerequisites
+
+You need three command-line tools. Open the **Terminal** app (press <kbd>⌘ Space</kbd>, type "Terminal", hit <kbd>Enter</kbd>).
+
+### macOS
+
+If you've never used Homebrew, install it first by pasting this into Terminal:
 
 ```bash
-git clone <this-private-repo>
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Then install the three tools:
+
+```bash
+brew install git python@3.12 ffmpeg
+```
+
+### Windows
+
+Install each from its official page:
+- **Git** — [git-scm.com/download/win](https://git-scm.com/download/win)
+- **Python 3.12** — [python.org/downloads](https://www.python.org/downloads/) (during install, check **"Add Python to PATH"**)
+- **FFmpeg** — [ffmpeg.org/download.html](https://ffmpeg.org/download.html) → unzip → add the `bin/` folder to your PATH
+
+### Verify it worked
+
+Paste this into Terminal:
+
+```bash
+git --version && python3 --version && ffmpeg -version | head -1
+```
+
+You should see three version numbers. If one errors, that one didn't install correctly — fix it before continuing.
+
+---
+
+## Step 3 — Get your three API keys
+
+Each service has a free signup. You only pay for usage.
+
+| Service | What it does | Where to get a key | What it costs |
+|---------|--------------|--------------------|---------------|
+| **fal.ai** | Lip-syncs your character to the audio | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) | Add ~$10 to balance — pay per second of video |
+| **ElevenLabs** | Reads Hebrew text aloud in a chosen voice | [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys) | **Creator plan required ($22/month)** — Free/Starter return errors on Hebrew |
+| **Google AI** | Generates the still images of your characters | [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) | Free tier is fine to start |
+
+For each: sign up → find the **API keys** section → click **Create key** → copy the long string. Save them in a temporary note — you'll paste them into a config file in Step 5.
+
+> ⚠️ **ElevenLabs tier matters**: Free and Starter plans don't support Hebrew on the `eleven_v3` model the pipeline uses. Upgrade to **Creator** ($22/mo) before you start, or you'll get a 400 error on every TTS call.
+
+---
+
+## Step 4 — Download the project
+
+In Terminal:
+
+```bash
+cd ~/Documents
+git clone https://github.com/oferweintraub/mind-videos.git mind-video
 cd mind-video
-python -m venv venv
+```
+
+If you'd rather not use git, you can download a ZIP from the repo's web page → unzip → put the folder at `~/Documents/mind-video/`.
+
+Then install the Python dependencies (one-time):
+
+```bash
+python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env       # then edit .env with your three keys (next section)
 ```
 
-You also need **FFmpeg** on `$PATH`:
-- macOS: `brew install ffmpeg`
-- Linux: `sudo apt install ffmpeg`
-- Windows: https://ffmpeg.org/download.html → add to PATH
-
-### 1.2 API keys
-
-Edit `.env` and paste:
-
-| Key | Get it at | Required for | Tier |
-|-----|-----------|--------------|------|
-| `FAL_KEY` | https://fal.ai/dashboard/keys | Lip-sync (VEED Fabric 1.0) | **Paid balance required** — Free tier returns 403. Top up ~$10 to start |
-| `ELEVENLABS_API_KEY` | https://elevenlabs.io/app/settings/api-keys | Hebrew TTS via `eleven_v3` | **Creator+ ($22/mo)** — Free/Starter tiers return 403 on `eleven_v3` |
-| `GOOGLE_API_KEY` | https://aistudio.google.com/app/apikey | Image generation (Nano Banana Pro) | Free tier OK |
-
-### 1.3 Smoke test
-
-```bash
-python scripts/mini_test_lipsync.py
-```
-
-If this writes a ~3s MP4 to `output/`, you're good.
-
-### 1.4 Render the shipped example
-
-The repo ships with one example episode and 3 pre-built characters:
-
-```bash
-python scripts/make_episode.py example_hostages
-# → episodes/example_hostages/final.mp4
-```
-
-That's the entire pipeline run. Open the MP4 to confirm.
+This downloads ~200 MB of Python libraries. Takes 1–2 minutes.
 
 ---
 
-## 2. The three slash commands
+## Step 5 — Add your API keys to the project
 
-If you have Claude Code or Claude Cowork open in this repo, the workflow is:
+Still in Terminal, in the `mind-video` folder:
 
-### 2.1 `/new-character "<description>"`
+```bash
+cp .env.example .env
+open -e .env
+```
 
-> /new-character a young woman with curly red hair, freckles, denim jacket, in lego style
+This opens the `.env` file in TextEdit. You'll see:
 
-Claude:
-1. Picks a slug + style (asks you to confirm)
-2. Runs `scripts/character_lab.py` — generates 3 candidate images via Nano Banana Pro (~60s, ~$0.12 total)
-3. Shows you the 3 PNGs at `characters/_candidates/<slug>/option_{1,2,3}.png` and asks which one to keep
-4. Asks for a voice ID (suggests stock options) + tempo + display name
-5. Runs `scripts/save_character.py` — promotes the picked candidate to `characters/<slug>/`
+```
+FAL_KEY=
+ELEVENLABS_API_KEY=
+GOOGLE_API_KEY=
+```
 
-After this, the character is reusable across any future script.
+Paste each key after the `=` sign. No quotes, no spaces. Save and close.
 
-**Available styles** (preset prompt fragments — anything else is treated as free-text):
+---
 
-`south_park`, `lego`, `muppet`, `pixar`, `ghibli`, `comic`, `anime`
+## Step 6 — Open the project in Claude Desktop
 
-For more authentic style fidelity (e.g. "true Muppet felt look"), see [`docs/advanced-styles.md`](docs/advanced-styles.md) — it covers FLUX LoRA training, Cartoonify, Ghiblify, and other fal.ai routes that produce stronger style results at higher setup cost.
+1. Open Claude Desktop.
+2. Click the **Code** tab.
+3. At the top of the input area, click the **Project folder** dropdown → **Open folder**.
+4. Navigate to `~/Documents/mind-video/` and choose it.
 
-### 2.2 `/new-script <slug> [topic | --from <path>]`
+Claude will read the project. You'll know it worked because typing `/` in the input shows `/new-character`, `/new-script`, and `/make-video` in the command list.
 
-> /new-script grandma_remembers a satirical piece about a politician forgetting his promises
+> 💡 **Permission tip for non-coders**: in Claude's settings (or per-session), set the permission mode to **"Accept edits"**. Claude will auto-accept file edits but still ask before running shell commands — a safe default.
 
-Claude:
-1. Lists the available characters from `characters/`
-2. Asks who should appear and in what order
-3. Drafts 3-5 Hebrew segments matching each character's personality
-4. Shows you the draft and lets you revise
-5. Saves to `episodes/<slug>/script.md` once approved
-6. Validates the script against the character library
+---
 
-**Starting from an existing draft** — pass `--from <path>` to import a `.txt`, `.md`, `.docx`, or `.pdf`:
+## Step 7 — Render the example to confirm everything works
 
-> /new-script my_draft --from ~/Documents/dialogue.docx
+In the Claude chat input, type:
 
-Claude extracts the text via `scripts/extract_text.py`, shows you the content, proposes a speaker mapping (e.g. *line 1 → @anchor_female, line 2 → @eden*) based on any speaker labels in the source, and asks you to confirm before saving. For `.doc` (old Word), `.rtf`, or Google Docs: convert to `.docx`/`.txt` first (the script tells you how if you point it at an unsupported format).
+```
+/make-video example_hostages
+```
 
-### 2.3 `/make-video <slug>`
+This renders the example episode that ships with the repo (3 segments, ~30 seconds, ~$1.50 in credits). Claude will:
 
-> /make-video grandma_remembers
+1. Estimate the cost and ask **"proceed?"** — say **yes**.
+2. Run the pipeline (TTS → lip-sync → concat). About 3–4 minutes wallclock.
+3. Tell you the path to the finished MP4 and open it for you.
 
-Claude:
-1. Estimates cost (~$0.10 per second of audio)
-2. Asks you to confirm
-3. Runs `scripts/make_episode.py` — the pipeline:
-   - **TTS** per segment (ElevenLabs `eleven_v3` Hebrew, ~5-15s each)
-   - **Lip-sync** per segment (VEED Fabric 1.0, ~15s per second of audio)
+If the video plays — congratulations, the entire pipeline is working. You're ready to make your own.
+
+---
+
+## The three slash commands
+
+### `/new-character`
+
+Design a new character. Type a description (and optionally a style):
+
+```
+/new-character a young woman with curly red hair, freckles, denim jacket, in lego style
+```
+
+Claude will:
+1. Pick a slug + style + description and ask you to confirm.
+2. Generate **3 candidate images** with Nano Banana Pro (~60 seconds, ~$0.12 total).
+3. Show you the three images at `characters/_candidates/<slug>/option_{1,2,3}.png` and ask which to keep.
+4. Ask which **voice** you want (suggests Laura, Charlie, Jessica from ElevenLabs stock — paste any voice ID from [elevenlabs.io/voice-library](https://elevenlabs.io/voice-library)).
+5. Save the chosen image + voice settings into your character library.
+
+After this, the character is reusable in any future script.
+
+**Built-in styles** (just type the name): `south_park`, `lego`, `muppet`, `pixar`, `ghibli`, `comic`, `anime`. Anything else is treated as a free-text style description.
+
+For higher-fidelity styles (e.g. true Muppet felt textures via FLUX LoRA training), see [`docs/advanced-styles.md`](docs/advanced-styles.md).
+
+### `/new-script`
+
+Draft a Hebrew dialogue script. Two ways to use it:
+
+**From a topic:**
+
+```
+/new-script grandma_remembers a satirical piece about a politician forgetting his promises
+```
+
+**From an existing draft** (`.txt`, `.md`, `.docx`, or `.pdf`):
+
+```
+/new-script my_draft --from ~/Documents/dialogue.docx
+```
+
+Claude will:
+1. List your available characters and ask who should appear and in what order.
+2. Draft 3–5 Hebrew segments matching each character's personality (or, in draft-import mode, map segments from your file to characters).
+3. Show you the draft and ask for revisions.
+4. Save it to `episodes/<slug>/script.md`.
+5. Validate that every character referenced exists in your library.
+
+### `/make-video`
+
+Render a script into a finished MP4:
+
+```
+/make-video grandma_remembers
+```
+
+Claude will:
+1. Estimate the cost (~$0.10 per second of audio).
+2. Ask you to confirm.
+3. Run the pipeline:
+   - **TTS** per segment (ElevenLabs, ~5–15s each)
+   - **Lip-sync** per segment (VEED Fabric 1.0, ~15s of wallclock per second of finished video)
    - **Concat** into one 9:16 MP4 (FFmpeg)
-4. Shows the path to `episodes/<slug>/final.mp4`
+4. Show the path to `episodes/<slug>/final.mp4` and open it.
 
-The pipeline is **idempotent** — re-running with the same slug only regenerates segments whose `.mp3` or `.mp4` is missing. So iterating on a single line is cheap (just edit the `script.md` and re-run).
-
----
-
-## 3. The local Streamlit app
-
-If you don't have Claude Code/Cowork, there's a browser-based UI for the same workflow:
-
-```bash
-streamlit run app.py
-```
-
-Opens at `http://localhost:8501`. The app:
-- Loads all characters from `characters/` automatically
-- Defaults the cast to Channel 14 anchor♀ + anchor♂ + Eden if those slugs exist
-- Lets you edit Hebrew text per segment (RTL textareas), add/remove segments
-- Streams real-time progress (image ✓ / audio ✓ / lip-sync ⟳ with elapsed seconds)
-- Plays the final MP4 inline + offers a download button
-
-Output goes to `episodes/<your-name>/final.mp4`.
-
-The Streamlit app uses the **same** `src/pipeline/episode.py` and `src/character.py` modules as the CLI, so anything built one way works the other.
-
-### 3.1 Hosting it for collaborators (Streamlit Community Cloud, free)
-
-1. Push the repo to GitHub.
-2. Sign in at https://share.streamlit.io with GitHub.
-3. **New app** → pick the repo, branch `master`, main file `app.py`.
-4. **Advanced settings → Secrets** → paste:
-   ```toml
-   APP_PASSWORD = "<pick a shared password>"
-   ```
-5. **Deploy**. First boot ~3 min (installs `ffmpeg` from `packages.txt`).
-6. Share the URL + password.
-
-Collaborators see a password screen, then a sidebar where they paste their **own** API keys (so they spend their own fal.ai/ElevenLabs balance, not yours).
-
-**Limits**: 1 GB RAM (fine), ephemeral filesystem (download MP4s immediately), app sleeps after ~7 days of inactivity.
+The pipeline is **idempotent** — if a step fails or you tweak one line in the script, re-running only regenerates what changed. Iterating on a single line is cheap.
 
 ---
 
-## 4. Repo layout
+## What videos cost
 
-```
-mind-video/
-├── characters/                  # Character library — one dir per character
-│   ├── anchor_female/
-│   │   ├── manifest.json        # voice + metadata
-│   │   └── image.png            # the still used for lip-sync
-│   ├── anchor_male/
-│   ├── eden/
-│   └── _candidates/             # gitignored work area for /new-character
-├── episodes/                    # User scripts + their generated outputs
-│   ├── example_hostages/
-│   │   ├── script.md            # the input (you write this)
-│   │   ├── audio/  videos/      # intermediates (gitignored)
-│   │   └── final.mp4            # the output
-│   └── <your-episode>/
-├── scripts/                     # CLI tooling
-│   ├── character_lab.py         # generate N candidate stills
-│   ├── save_character.py        # promote candidate → library
-│   ├── make_episode.py          # render script.md → final.mp4
-│   ├── compare_lipsync.py       # 8-provider lip-sync benchmark
-│   ├── mini_test_lipsync.py     # one-clip smoke test
-│   └── _archive/                # historical one-off scripts
-├── src/
-│   ├── character.py             # Character/Voice dataclasses + loader
-│   ├── script_format.py         # script.md parser
-│   └── pipeline/episode.py      # generate_tts / lipsync / concat
-├── .claude/commands/            # Slash commands for Claude Code/Cowork
-│   ├── new-character.md
-│   ├── new-script.md
-│   └── make-video.md
-├── docs/advanced-styles.md      # FLUX LoRA / Cartoonify / Ghiblify routes
-├── examples/                    # Two finished example MP4s
-├── app.py                       # Streamlit UI
-├── lessons.md  TASKS.md         # Working notes
-└── README.md
-```
+| Action | Cost |
+|--------|------|
+| Designing one new character (3 candidates) | ~$0.12 |
+| One 30-second video (3 segments) | ~$1.50 – $3 |
+| One 60-second video (5–6 segments) | ~$3 – $6 |
+| ElevenLabs Creator plan (monthly fixed) | $22/month |
+
+Most of the per-video cost is lip-sync ($0.08/second of finished video). TTS comes from your ElevenLabs monthly quota. Image generation is pennies.
 
 ---
 
-## 5. Script format
+## The script format (in case you want to edit by hand)
 
-`episodes/<slug>/script.md`:
+`episodes/<slug>/script.md` looks like this:
 
 ```markdown
 ---
@@ -224,22 +270,66 @@ description: Optional one-liner
 אבל אמא, החטופים?
 ```
 
-**Rules**:
+Rules:
 - Each `## ` heading starts a new segment.
-- The first word after `##` MUST be a character slug from `characters/`.
-- Anything else on the heading line is annotation (helpful for humans, ignored by the pipeline).
-- The same character may appear multiple times — each `##` is its own segment with its own audio + video.
-- Hebrew text goes between headings. Multi-line is OK; lines are joined with `\n`.
+- The first word after `##` **must** be a character slug from `characters/`.
+- Anything else on the heading line is a note for humans (ignored by the pipeline).
+- The same character can appear multiple times — each `##` is a separate segment with its own audio + video.
+- Hebrew text goes between headings. Multiple lines are fine.
 
 ---
 
-## 6. How it works — the orchestration
+## Stuck?
+
+| Symptom | What's wrong | Fix |
+|---------|--------------|-----|
+| `/new-character` etc. don't appear when you type `/` | Claude isn't reading the project folder | Re-open the folder via the **Project folder** dropdown in Claude Desktop |
+| `403` from fal.ai | Out of balance | Top up at [fal.ai/dashboard/billing](https://fal.ai/dashboard/billing) |
+| `400` from ElevenLabs about `language_code='he'` | You're on Free or Starter | Upgrade to **Creator** ($22/mo) |
+| `ffmpeg atempo failed` | FFmpeg install is broken | Run `brew reinstall ffmpeg` (Mac) |
+| Pipeline seems frozen | Lip-sync is slow by design — about 15s of wallclock per second of finished video. A 25s line takes ~4 minutes | Wait |
+| Character looks different in each segment | The candidate image you picked doesn't have a strong, distinctive face | Re-run `/new-character` and pick a clearer one |
+| Mouth not lip-syncing well | The image has hands near the face, or mouth is partially covered | Re-pick a candidate with a clean, fully-visible mouth |
+| ElevenLabs blocks a voice clone | Don't name the clone after a public figure (against their ToS) | Use a generic name like "Hebrew Narrator Male" |
+
+If something else breaks, [`lessons.md`](lessons.md) catalogs every pitfall hit during production.
+
+---
+
+## Sharing it with friends (no install needed for them)
+
+If you have collaborators who want to render videos but don't want to install anything, the project ships with a browser-based UI ([`app.py`](app.py)) you can deploy for free on **Streamlit Community Cloud**:
+
+1. Push the repo to your own GitHub.
+2. Sign in at [share.streamlit.io](https://share.streamlit.io) with GitHub.
+3. **New app** → pick the repo, branch `master`, main file `app.py`.
+4. **Advanced settings → Secrets** → paste:
+   ```toml
+   APP_PASSWORD = "<pick a shared password>"
+   ```
+5. **Deploy**. First boot takes ~3 minutes.
+6. Share the URL + password.
+
+Collaborators see a password screen, then a sidebar where they paste their **own** API keys (they spend their own credits, not yours). Limits: 1 GB RAM, ephemeral filesystem (download MP4s immediately), the app sleeps after ~7 days of inactivity.
+
+You can also run the same app locally without deploying:
+
+```bash
+source venv/bin/activate
+streamlit run app.py
+```
+
+Opens at `http://localhost:8501`.
+
+---
+
+## How it works (under the hood)
 
 ```
 ┌──────────────────────────────────────────────┐
 │  scripts/make_episode.py <slug>              │
 │  • parse episodes/<slug>/script.md           │
-│  • for each segment, run steps 1-3           │
+│  • for each segment, run steps 1–3           │
 │  • idempotent: skip any output that exists   │
 └────────────────┬─────────────────────────────┘
                  │
@@ -257,44 +347,46 @@ description: Optional one-liner
             ┌────────────────────────────┐
             │ 3. CONCAT                  │
             │ ffmpeg -f concat -c copy   │
-            │ (re-encode fallback)       │
             │ → final.mp4 (9:16)         │
             └────────────────────────────┘
 ```
 
-Implementation notes (battle-tested — see `lessons.md`):
-- VEED Fabric 1.0 was chosen after benchmarking 8 lip-sync providers on Hebrew (`scripts/compare_lipsync.py`). LatentSync, Sync 1.9, MuseTalk had visibly worse quality; Aurora is a 25%-pricier backup.
-- `tempo=1.25` post-applied via `ffmpeg atempo` makes anchors sound urgent/manic; narrators stay at 1.0.
-- Each line gets its own MP4 → individual lines can be regenerated cheaply by deleting one file and re-running.
-- ElevenLabs `eleven_v3` is the only model that supports `language_code='he'` (`eleven_multilingual_v2` returns 400 on this).
+VEED Fabric 1.0 was chosen as the lip-sync provider after benchmarking 8 providers on Hebrew audio (script: [`scripts/compare_lipsync.py`](scripts/compare_lipsync.py)). Implementation notes and every gotcha hit in production live in [`lessons.md`](lessons.md).
 
----
+### Repo layout
 
-## 7. Cost reference
+```
+mind-video/
+├── characters/                  # Your character library — one folder per character
+│   ├── anchor_female/
+│   │   ├── manifest.json        # voice + metadata
+│   │   └── image.png            # the still used for lip-sync
+│   ├── anchor_male/  eden/
+│   └── _candidates/             # work area for /new-character (gitignored)
+├── episodes/                    # Your scripts + their outputs
+│   ├── example_hostages/
+│   │   ├── script.md            # input (you write this)
+│   │   ├── audio/  videos/      # intermediates (gitignored)
+│   │   └── final.mp4            # output
+│   └── <your-episode>/
+├── scripts/                     # CLI tooling (slash commands wrap these)
+│   ├── character_lab.py         # generate N candidate stills
+│   ├── save_character.py        # promote candidate → library
+│   ├── make_episode.py          # render script.md → final.mp4
+│   └── ...
+├── src/                         # Python modules
+│   ├── character.py             # Character/Voice loader
+│   ├── script_format.py         # script.md parser
+│   └── pipeline/episode.py      # TTS / lip-sync / concat
+├── .claude/commands/            # The three slash commands
+│   ├── new-character.md
+│   ├── new-script.md
+│   └── make-video.md
+├── examples/                    # Two finished example MP4s
+├── app.py                       # Streamlit UI
+├── docs/advanced-styles.md      # FLUX LoRA / Cartoonify / Ghiblify routes
+├── lessons.md   TASKS.md        # Working notes
+└── README.md
+```
 
-| Step | Cost |
-|------|------|
-| Character candidate (Nano Banana Pro) | ~$0.04 / image |
-| Hebrew TTS (ElevenLabs eleven_v3) | included in Creator plan ($22/mo) |
-| Lip-sync (VEED Fabric 1.0) | $0.08/s of audio @ 480p |
-| Concat (FFmpeg) | free |
-
-A typical 30s episode with 3 segments: **~$3-5** (mostly lip-sync).
-
-A typical character creation (3 candidates): **~$0.12**.
-
----
-
-## 8. Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| `403` from fal.ai | Out of balance → top up at https://fal.ai/dashboard/billing |
-| `400` from ElevenLabs on `language_code='he'` | You're on Free/Starter — `eleven_v3` requires Creator ($22/mo) |
-| `ffmpeg atempo failed` | ffmpeg install is broken (often a Homebrew x265/x264 dylib mismatch). Fix: `brew reinstall ffmpeg` |
-| Pipeline hangs / seems frozen | VEED Fabric ≈ 15s per second of audio. A 25s line takes ~4 min |
-| Character looks different per segment | Re-pick a more iconic candidate. For high-consistency needs, switch to FLUX Kontext Pro — see `docs/advanced-styles.md` |
-| Mouth not lip-syncing well | Image has hands near face or mouth covered. Re-pick or regenerate |
-| ElevenLabs blocks a voice clone | Don't name the clone after a public figure (ToS). Use a generic label |
-
-[`lessons.md`](lessons.md) catalogs every pitfall hit in production. [`TASKS.md`](TASKS.md) is the running checkpoint.
+For developers extending the pipeline, see [`docs/advanced-styles.md`](docs/advanced-styles.md), [`lessons.md`](lessons.md), and [`TASKS.md`](TASKS.md).
