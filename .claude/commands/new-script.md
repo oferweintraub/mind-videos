@@ -1,13 +1,29 @@
 ---
 description: Draft a new episode script.md (Hebrew dialogue across multiple characters)
-argument-hint: <slug-for-the-episode> [optional: theme/topic in plain language]
+argument-hint: <slug> [topic] | <slug> --from <path/to/draft.{txt,md,docx,pdf}>
 ---
 
 The user wants to draft a new episode script.
 
 User input: **$ARGUMENTS**
 
-## Step 1 — Pick a slug + topic
+## Step 1 — Pick a slug + topic OR ingest a draft
+
+Detect which mode the user is in by scanning `$ARGUMENTS`:
+
+**Draft-import mode** — if the args contain `--from <path>`, OR a path that ends in `.txt`, `.md`, `.docx`, or `.pdf`, OR the user said something like "convert this file" / "use this draft":
+
+1. Run:
+   ```bash
+   source venv/bin/activate && python scripts/extract_text.py "<path>"
+   ```
+   This prints the plain text of the draft to stdout. Capture it.
+2. Show the user the extracted text (or the first 30-40 lines if it's long) and ask them to confirm it looks right.
+3. **Skip step 2 below** (you already have content). Go to step 3 with the extracted text as the source.
+
+If the user pastes raw text directly into `$ARGUMENTS` (no path), treat that as the draft and skip extraction — go straight to step 3.
+
+**Topic mode** — anything else:
 
 If `$ARGUMENTS` already gives a slug, use it. Otherwise propose one (lowercase, underscores, ≤ 30 chars) and confirm with the user.
 
@@ -35,12 +51,26 @@ If the user wants a character that doesn't exist yet, suggest running `/new-char
 
 ## Step 3 — Draft the dialogue
 
-Write 3-5 Hebrew segments. Match each character's voice/personality from their manifest description. The Channel 14 + Eden format is a strong default if the user hasn't specified another:
+If you came from **topic mode**, write 3-5 fresh Hebrew segments. Match each character's voice/personality from their manifest description. The Channel 14 + Eden format is a strong default if the user hasn't specified another:
 
 - 2-4 over-the-top adoring statements from the anchor(s)
 - A final quiet question from a child or skeptic that punctures the narrative
 
-Show the full draft to the user **before saving** and ask for revisions. The user may want to edit lines, reorder, add/remove segments.
+If you came from **draft-import mode**, you have an existing text. Your job is to:
+1. Split the text into segments (paragraphs, dialogue beats, or natural pauses).
+2. **Map each segment to a character slug** from `characters/`. Look for explicit speaker labels in the source (e.g. "Anchor: ...", "אנקור: ...", "[Eden]: ..."), and fuzzy-match them to slugs. If the source has no speaker labels, propose an assignment based on tone/content and the personalities in the character manifests.
+3. If any segment is too long for one breath (~25s of audio at 15 chars/sec ≈ 375 chars), suggest splitting it.
+4. If the source is in English or another non-Hebrew language and the user wants Hebrew output, translate it — but tell the user you translated and ask them to verify.
+
+In **both** modes: show the full draft to the user **before saving** and ask for revisions. Speaker mappings especially deserve a visible pass — list them as e.g.:
+
+```
+#1 → @anchor_female: "אני מאוהבת..."
+#2 → @anchor_male:   "לגמרי..."
+#3 → @eden:          "אבל אמא..."
+```
+
+Ask: "Do these speaker assignments look right? Any to swap or split?"
 
 ## Step 4 — Save
 

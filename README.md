@@ -91,7 +91,7 @@ After this, the character is reusable across any future script.
 
 For more authentic style fidelity (e.g. "true Muppet felt look"), see [`docs/advanced-styles.md`](docs/advanced-styles.md) — it covers FLUX LoRA training, Cartoonify, Ghiblify, and other fal.ai routes that produce stronger style results at higher setup cost.
 
-### 2.2 `/new-script <slug> [topic]`
+### 2.2 `/new-script <slug> [topic | --from <path>]`
 
 > /new-script grandma_remembers a satirical piece about a politician forgetting his promises
 
@@ -102,6 +102,12 @@ Claude:
 4. Shows you the draft and lets you revise
 5. Saves to `episodes/<slug>/script.md` once approved
 6. Validates the script against the character library
+
+**Starting from an existing draft** — pass `--from <path>` to import a `.txt`, `.md`, `.docx`, or `.pdf`:
+
+> /new-script my_draft --from ~/Documents/dialogue.docx
+
+Claude extracts the text via `scripts/extract_text.py`, shows you the content, proposes a speaker mapping (e.g. *line 1 → @anchor_female, line 2 → @eden*) based on any speaker labels in the source, and asks you to confirm before saving. For `.doc` (old Word), `.rtf`, or Google Docs: convert to `.docx`/`.txt` first (the script tells you how if you point it at an unsupported format).
 
 ### 2.3 `/make-video <slug>`
 
