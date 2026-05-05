@@ -1,0 +1,15 @@
+{
+  "slug": "eden",
+  "display_name": "Eden (the kid)",
+  "description": "7-10 year old Israeli girl, two messy braids tied with mismatched ribbons, pink pajamas, hugging a worn stuffed bunny, sitting on an orange couch in a warm living room, brow furrowed in honest puzzlement.",
+  "style": "south_park",
+  "voice": {
+    "voice_id": "cgSgspJ2msm6clMCkdW9",
+    "voice_name": "Jessica (ElevenLabs stock)",
+    "stability": 0.55,
+    "similarity": 0.7,
+    "style": 0.25,
+    "tempo": 1.0
+  },
+  "image": "image.png"
+}

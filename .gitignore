@@ -45,6 +45,17 @@ htmlcov/
 output/*
 !output/.gitkeep
 
+# Episode artifacts — keep script.md, ignore generated audio/videos/final
+episodes/*/audio/
+episodes/*/videos/
+episodes/*/final.mp4
+
+# Character candidate work area (regeneratable, can be huge)
+characters/_candidates/
+
+# Claude Code ephemeral worktrees
+.claude/worktrees/
+
 # OS
 .DS_Store
 Thumbs.db

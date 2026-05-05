@@ -1,314 +1,294 @@
-# Mind Video — Hebrew Satirical Video Pipeline
+# Mind Video — Hebrew Animated Video Pipeline
 
-Automated pipeline for producing short (≈30-60s) Hebrew satirical videos in the **"בגדי המלך החדשים"** ("The Emperor's New Clothes") format — Channel 14-style anchors enthusiastically delivering a piece of state propaganda, then cutting to **Eden**, a 7-8 year old girl who asks one innocent question that collapses the whole narrative.
+End-to-end pipeline for producing short (≈30-60s) animated talking-character videos. Designed to be **driven from inside Claude Code or Claude Cowork** via three slash commands — no Python knowledge required to operate it.
 
-The pipeline is fully orchestrated: a Python script defines the script + characters, three external services produce stills/voice/lip-sync, and FFmpeg stitches the result into a single 9:16 MP4 ready for social posting.
+```
+/new-character  →  generate 3 candidate stills, pick one, save it to the library
+/new-script     →  draft a Hebrew dialogue across N characters into a script.md
+/make-video     →  render that script.md to final.mp4 (TTS + lip-sync + concat)
+```
 
----
+The pipeline orchestrates three external services: **Google Nano Banana Pro** (images), **ElevenLabs v3** (Hebrew TTS), and **VEED Fabric 1.0** on fal.ai (lip-sync), then stitches with **FFmpeg**.
 
-## 1. What this does
+Two finished examples ship in [`examples/`](examples/) — both produced from this exact pipeline:
 
-You write a **script** (Hebrew text + which character speaks each line) and a **character description** (Channel 14 anchors and Eden are pre-built — see below). The pipeline produces a final stitched video by:
-
-1. Generating a **South Park-style cartoon still** for each speaking character via Google's **Nano Banana Pro**.
-2. Running each line through **ElevenLabs v3 Hebrew TTS** with a per-character voice + emotion + tempo.
-3. Sending each (still + audio) pair to **VEED Fabric 1.0** (or Aurora as a fallback) for lip-synced video.
-4. Concatenating all clips with **FFmpeg** into a final `final.mp4`.
-
-Two finished examples ship in [`examples/`](examples/):
-
-| File | Format | Duration | Theme |
-|------|--------|----------|-------|
-| [`examples/pilot_hostages.mp4`](examples/pilot_hostages.mp4) | 3 segments (anchor♀ → anchor♂ → Eden) | 29.1s | Hostages still in Gaza after 800 days |
-| [`examples/ep02_victory.mp4`](examples/ep02_victory.mp4) | 5 segments (♀ → ♂ → ♀ → ♂ → Eden) | 30.6s | "We crushed Iran"… but did we? |
+| File | Format | Duration |
+|------|--------|----------|
+| [`pilot_hostages.mp4`](examples/pilot_hostages.mp4) | 3 segments (♀ anchor → ♂ anchor → Eden) | 29.1s |
+| [`ep02_victory.mp4`](examples/ep02_victory.mp4) | 5 segments | 30.6s |
 
 ---
 
-## 2. Deploy
+## 1. Quick start (5 minutes)
 
-### 2.1 Prerequisites
-- Python 3.10+
-- **FFmpeg** on `$PATH`
-  - macOS: `brew install ffmpeg`
-  - Linux (Debian/Ubuntu): `sudo apt install ffmpeg`
-  - Windows: download from https://ffmpeg.org/download.html and add to PATH
-- API keys:
+### 1.1 Clone + install
 
-| Service | Required for | Notes |
-|---------|--------------|-------|
-| **fal.ai** ([key](https://fal.ai/dashboard/keys)) | VEED Fabric 1.0 lip-sync (and Aurora fallback) | **Paid balance required** — the Free tier returns 403. Top up ~$10 on https://fal.ai/dashboard/billing |
-| **ElevenLabs** ([key](https://elevenlabs.io/app/settings/api-keys)) | Hebrew TTS via `eleven_v3` + `language_code='he'` | **`eleven_v3` requires Creator plan or higher** ($22/mo). Free-tier accounts get 403 on this model |
-| **Google AI Studio** ([key](https://aistudio.google.com/app/apikey)) | Nano Banana Pro image generation | **Optional** — only needed if you regenerate character images via `scripts/fix_v2.py`. The Streamlit UI uses pinned images from `examples/` and works without this key |
-
-### 2.2 Install
 ```bash
 git clone <this-private-repo>
 cd mind-video
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env       # then edit .env and paste your three keys
+cp .env.example .env       # then edit .env with your three keys (next section)
 ```
 
-### 2.3 Smoke test
+You also need **FFmpeg** on `$PATH`:
+- macOS: `brew install ffmpeg`
+- Linux: `sudo apt install ffmpeg`
+- Windows: https://ffmpeg.org/download.html → add to PATH
+
+### 1.2 API keys
+
+Edit `.env` and paste:
+
+| Key | Get it at | Required for | Tier |
+|-----|-----------|--------------|------|
+| `FAL_KEY` | https://fal.ai/dashboard/keys | Lip-sync (VEED Fabric 1.0) | **Paid balance required** — Free tier returns 403. Top up ~$10 to start |
+| `ELEVENLABS_API_KEY` | https://elevenlabs.io/app/settings/api-keys | Hebrew TTS via `eleven_v3` | **Creator+ ($22/mo)** — Free/Starter tiers return 403 on `eleven_v3` |
+| `GOOGLE_API_KEY` | https://aistudio.google.com/app/apikey | Image generation (Nano Banana Pro) | Free tier OK |
+
+### 1.3 Smoke test
+
 ```bash
 python scripts/mini_test_lipsync.py
 ```
-This generates one ~3-second clip end-to-end. If it produces an MP4, the deploy is healthy.
 
-### 2.4 Reproduce the two shipped examples
+If this writes a ~3s MP4 to `output/`, you're good.
+
+### 1.4 Render the shipped example
+
+The repo ships with one example episode and 3 pre-built characters:
+
 ```bash
-python scripts/fix_v2.py pilot   # → output/pilot_v5/final.mp4 (≈29s)
-python scripts/fix_v2.py ep02    # → output/ep02_v3/final.mp4 (≈31s)
+python scripts/make_episode.py example_hostages
+# → episodes/example_hostages/final.mp4
 ```
-Each script is **idempotent** — it skips any image/audio/video that already exists on disk, so re-runs after a partial failure resume cleanly.
 
-**Cost per ~30s episode**: ~$3-5 (most of it is VEED Fabric at $0.08/s × 30s × 3-5 segments).
+That's the entire pipeline run. Open the MP4 to confirm.
 
-### 2.5 Local UI (recommended for non-CLI users)
+---
+
+## 2. The three slash commands
+
+If you have Claude Code or Claude Cowork open in this repo, the workflow is:
+
+### 2.1 `/new-character "<description>"`
+
+> /new-character a young woman with curly red hair, freckles, denim jacket, in lego style
+
+Claude:
+1. Picks a slug + style (asks you to confirm)
+2. Runs `scripts/character_lab.py` — generates 3 candidate images via Nano Banana Pro (~60s, ~$0.12 total)
+3. Shows you the 3 PNGs at `characters/_candidates/<slug>/option_{1,2,3}.png` and asks which one to keep
+4. Asks for a voice ID (suggests stock options) + tempo + display name
+5. Runs `scripts/save_character.py` — promotes the picked candidate to `characters/<slug>/`
+
+After this, the character is reusable across any future script.
+
+**Available styles** (preset prompt fragments — anything else is treated as free-text):
+
+`south_park`, `lego`, `muppet`, `pixar`, `ghibli`, `comic`, `anime`
+
+For more authentic style fidelity (e.g. "true Muppet felt look"), see [`docs/advanced-styles.md`](docs/advanced-styles.md) — it covers FLUX LoRA training, Cartoonify, Ghiblify, and other fal.ai routes that produce stronger style results at higher setup cost.
+
+### 2.2 `/new-script <slug> [topic]`
+
+> /new-script grandma_remembers a satirical piece about a politician forgetting his promises
+
+Claude:
+1. Lists the available characters from `characters/`
+2. Asks who should appear and in what order
+3. Drafts 3-5 Hebrew segments matching each character's personality
+4. Shows you the draft and lets you revise
+5. Saves to `episodes/<slug>/script.md` once approved
+6. Validates the script against the character library
+
+### 2.3 `/make-video <slug>`
+
+> /make-video grandma_remembers
+
+Claude:
+1. Estimates cost (~$0.10 per second of audio)
+2. Asks you to confirm
+3. Runs `scripts/make_episode.py` — the pipeline:
+   - **TTS** per segment (ElevenLabs `eleven_v3` Hebrew, ~5-15s each)
+   - **Lip-sync** per segment (VEED Fabric 1.0, ~15s per second of audio)
+   - **Concat** into one 9:16 MP4 (FFmpeg)
+4. Shows the path to `episodes/<slug>/final.mp4`
+
+The pipeline is **idempotent** — re-running with the same slug only regenerates segments whose `.mp3` or `.mp4` is missing. So iterating on a single line is cheap (just edit the `script.md` and re-run).
+
+---
+
+## 3. The local Streamlit app
+
+If you don't have Claude Code/Cowork, there's a browser-based UI for the same workflow:
+
 ```bash
 streamlit run app.py
 ```
-A browser tab opens at `http://localhost:8501` with an episode builder:
-- 3 default segments pre-loaded (♀ anchor → ♂ anchor → Eden) with their pinned character images for visual consistency.
-- Edit Hebrew text per segment (RTL textareas), add/remove segments, see a live cost estimate.
-- Click **▶ Generate video** to watch real-time progress for each segment (image ✓ / audio ✓ / lip-sync ⟳ with elapsed seconds).
-- When done, the final MP4 plays inline + a **⬇ Download** button. The output path is `output/<episode-name>/final.mp4`.
-- Re-clicking Generate with the same episode name reuses cached steps — cheap iteration on a single line.
 
-The UI uses the same shared functions in `src/pipeline/episode.py` as the CLI scripts, so anything you build there is reproducible from the command line.
+Opens at `http://localhost:8501`. The app:
+- Loads all characters from `characters/` automatically
+- Defaults the cast to Channel 14 anchor♀ + anchor♂ + Eden if those slugs exist
+- Lets you edit Hebrew text per segment (RTL textareas), add/remove segments
+- Streams real-time progress (image ✓ / audio ✓ / lip-sync ⟳ with elapsed seconds)
+- Plays the final MP4 inline + offers a download button
 
-### 2.6 Deploy on Streamlit Community Cloud (free)
+Output goes to `episodes/<your-name>/final.mp4`.
 
-For a hosted version your collaborators can use from a browser without installing anything:
+The Streamlit app uses the **same** `src/pipeline/episode.py` and `src/character.py` modules as the CLI, so anything built one way works the other.
 
-1. **Push the repo to GitHub** (already done if you're reading this).
-2. Sign in at https://share.streamlit.io with your GitHub account.
-3. **New app** → pick this repo, branch `master`, main file `app.py`.
-4. **Advanced settings → Secrets**: paste a TOML block with two values:
+### 3.1 Hosting it for collaborators (Streamlit Community Cloud, free)
+
+1. Push the repo to GitHub.
+2. Sign in at https://share.streamlit.io with GitHub.
+3. **New app** → pick the repo, branch `master`, main file `app.py`.
+4. **Advanced settings → Secrets** → paste:
    ```toml
-   APP_PASSWORD = "pick-a-shared-password-here"
+   APP_PASSWORD = "<pick a shared password>"
    ```
-   (Optionally also `FAL_KEY`, `ELEVENLABS_API_KEY`, `GOOGLE_API_KEY` if you want the app to work without users pasting their own — *but be aware: anyone with the password and URL will spend your fal.ai balance*.)
-5. Click **Deploy**. Streamlit Cloud installs `ffmpeg` from `packages.txt` and Python deps from `requirements.txt` automatically. First boot takes ~3 minutes.
-6. Share the URL + password with collaborators.
+5. **Deploy**. First boot ~3 min (installs `ffmpeg` from `packages.txt`).
+6. Share the URL + password.
 
-**What collaborators see**:
-- Locked password screen first
-- After login: a sidebar asks for their own fal.ai + ElevenLabs keys (with links to get them)
-- Main panel: the same episode builder as local
+Collaborators see a password screen, then a sidebar where they paste their **own** API keys (so they spend their own fal.ai/ElevenLabs balance, not yours).
 
-**Two layers of protection**:
-- **Password gate** — keeps strangers out of the app entirely.
-- **Bring-your-own-keys** — even if a collaborator misuses the app, they spend their own fal.ai balance, not yours.
-
-**Tier reminders**:
-- fal.ai needs paid balance (~$10 minimum top-up)
-- ElevenLabs `eleven_v3` requires Creator plan ($22/mo) or higher
-
-**Limits of Streamlit Cloud free tier**:
-- App sleeps after ~7 days of inactivity (cold start ~30s)
-- 1 GB RAM (fine for this — no heavy CPU work, the heavy lifting is in fal.ai/ElevenLabs)
-- Filesystem is ephemeral — generated MP4s are gone on app restart, so users should download immediately
-- 1 private app on free tier (this is the one)
+**Limits**: 1 GB RAM (fine), ephemeral filesystem (download MP4s immediately), app sleeps after ~7 days of inactivity.
 
 ---
 
-## 3. The Channel 14 + Eden format
-
-Every episode is a fixed three-beat structure:
-
-```
-[Channel 14 studio]   anchors deliver the regime line, dripping with adoration
-       ↓
-[Cut to living room]  Eden, with her stuffed bunny, asks one quiet question
-       ↓
-[Silence]             — there is no answer, because there is no answer
-```
-
-### Cast (pre-built)
-
-| Character | Description | Voice | Tempo |
-|-----------|-------------|-------|-------|
-| **Female anchor** ([`examples/anchor_female_inlove.png`](examples/anchor_female_inlove.png)) | Mizrahi woman, 30s, dramatic eye makeup, gold hoops, tight black top with a giant **"14"**. Love-struck, swooning. | ElevenLabs **Laura** (`FGY2WhTYpPnrIDTdsKH5`), style 0.85 | 1.25× |
-| **Male anchor** ([`examples/anchor_male_desk.png`](examples/anchor_male_desk.png)) | Mizrahi man, 30s, gelled hair, gold chain, dark polo with **"14"**. Cocky smirk, fist on desk. | ElevenLabs **Charlie** (`IKne3meq5aSn9XLyUdCD`), style 0.90 | 1.25× |
-| **Eden** ([`examples/eden_puzzled.png`](examples/eden_puzzled.png)) | 7-10 y.o. Israeli girl, two braids with mismatched ties, pink pajamas, stuffed bunny. Puzzled, brow furrowed. | ElevenLabs **Jessica** (`cgSgspJ2msm6clMCkdW9`), style 0.25 | 1.0× |
-
-All three are rendered in flat 2D **South Park style** (paper-cutout, thick outlines, bright flat colors) — the prompt fragment is shared across every image and pinned at the top of each script as `STYLE_SOUTHPARK`.
-
-### Example script #1 — "Hostages" (`scripts/fix_episodes.py` → `fix_pilot`)
-
-> **Female anchor** *(love-struck)*: "אני מאוהבת, איזה מנהיג חזק, איזה מנהיג דגול יש לנו, קרה לנו נס!"
->
-> **Male anchor** *(fist-pumping)*: "לגמרי! לא משאירים אנשים מאחור, זה לא יקרה במשמרת שלנו!"
->
-> **Eden** *(quiet, on the orange couch)*: "אמא, הוא אמר שלא משאירים אנשים מאחור, אבל את החטופים השארנו מאחור, השארנו שמונה מאות ימים. אמא, ארבעים ושישה מהם נרצחו במנהרות בעזה. אז למה הוא התכוון שלא משאירים אנשים מאחור? למה הוא התכוון אמא?"
-
-Result: [`examples/pilot_hostages.mp4`](examples/pilot_hostages.mp4)
-
-### Example script #2 — "Victory" (`scripts/fix_v2.py` → `fix_ep02`)
-
-> **Female ♀**: "אני מאוהבת, איזה מנהיג חזק, איזה מנהיג דגול יש לנו, קרה לנו נס!"
->
-> **Male ♂**: "לגמרי! באיראן השמדנו הכל! לא נשאר להם אפילו אורז למרק!"
->
-> **Female ♀**: "ככה נראה ניצחון מוחלט! אין לנו יותר אויבים! איזה מנהיג!"
->
-> **Male ♂**: "ממש! אפילו החמוצים בשמאל חייבים להודות! מנהיג ענק, חד פעמי, בן גוריון אבל פי אלף!"
->
-> **Eden**: "אבל אמא, החמאס בעזה נשאר, לא? החיזבאללה ממשיכים עם הטילים וכל הצפון מופגז. אמא, ככה נראה ניצחון מוחלט? ככה נראה ביטחון? זה אנחנו ניצחנו אמא?"
-
-Result: [`examples/ep02_victory.mp4`](examples/ep02_victory.mp4)
-
----
-
-## 4. How it works — the orchestration
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Python script (e.g. scripts/fix_v2.py)                             │
-│  • defines characters + per-line text + voice settings              │
-│  • runs the four steps below, idempotently (skip-if-exists)         │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-        ┌──────────────────────┼──────────────────────────┐
-        ▼                      ▼                          ▼
-┌──────────────────┐  ┌──────────────────┐    ┌─────────────────────┐
-│ 1. IMAGES        │  │ 2. AUDIO         │    │  (per character     │
-│ Nano Banana Pro  │  │ ElevenLabs v3    │    │   line, in parallel)│
-│ (Google AI)      │  │ Hebrew TTS       │    │                     │
-│ → output/.../    │  │ → raw .mp3       │    │                     │
-│   *.png          │  │ → ffmpeg atempo  │    │                     │
-│                  │  │   (e.g. 1.25×)   │    │                     │
-└────────┬─────────┘  └────────┬─────────┘    └─────────────────────┘
-         │                     │
-         └──────────┬──────────┘
-                    ▼
-        ┌─────────────────────────────┐
-        │ 3. LIP-SYNC VIDEO           │
-        │ VEED Fabric 1.0 (fal.ai)    │
-        │   primary @ $0.08/s, 480p   │
-        │ Aurora (Creatify) fallback  │
-        │   $0.10/s, +25% slower      │
-        │ → segment_*.mp4             │
-        └────────────┬────────────────┘
-                     ▼
-        ┌─────────────────────────────┐
-        │ 4. CONCATENATE              │
-        │ ffmpeg -f concat -c copy    │
-        │ (re-encodes only on codec   │
-        │  mismatch, libx264 + aac)   │
-        │ → final.mp4 (9:16)          │
-        └─────────────────────────────┘
-```
-
-**Key implementation details** (already battle-tested — see `lessons.md`):
-- Each line gets its own MP4 — they're concatenated last so individual lines can be regenerated cheaply.
-- VEED Fabric 1.0 was chosen after benchmarking 8 lip-sync providers on Hebrew (`scripts/compare_lipsync.py`); see `TASKS.md` for the full table.
-- `tempo=1.25×` post-applied via `ffmpeg atempo` makes the anchors sound urgent/manic; Eden stays at 1.0 to keep her voice innocent.
-- Polling pattern: `submit_async` → poll `status_async` every 8s → `result_async` → download MP4.
-
----
-
-## 5. Advanced — Build your own
-
-The pipeline is parameterized — you can keep the same plumbing and swap any of: theme, characters, voices, or the whole script.
-
-### 5.1 New theme (same Channel 14 + Eden cast)
-Easiest path. Copy `scripts/fix_v2.py` → `scripts/my_episode.py` and just edit:
-- The Hebrew text inside each `generate_tts(text=..., voice_id=..., ...)` call.
-- The `concat([...])` list (number/order of segments).
-
-The character images (`anchor_female_*.png`, `anchor_male_desk.png`, `eden_puzzled.png`) are reusable — VEED Fabric only changes the lips per line, so the same still works for any text.
-
-There are six more pilot scripts already drafted in [`briefs/emperors_clothes_pilot.md`](briefs/emperors_clothes_pilot.md) ("המשק פורח", "ניצחון מוחץ", "החטופים בראש סדר העדיפויות", "בחירות שוב", "חופש העיתונות", "יוקר הדיור") — pick one and wire it into a new script.
-
-### 5.2 New characters
-Replace the prompt block at the top of your script (search for `ANCHOR_IMAGES` in `scripts/pilot_v2.py` for the pattern). The recipe that produces consistent characters is:
-
-```
-"Generate a 9:16 image of <demographics>, <body/face features>, "
-"<wardrobe + the channel-14 number}, "
-"<expression — leaning forward / love-struck / fist on desk}, "
-"<setting — anchor desk + screen behind / orange couch / etc.}, "
-"Rendered in <STYLE_SOUTHPARK>."   # keep the style pinned
-```
-
-For a non-Channel-14 satirical theme, swap the wardrobe and the screen text. For a non-cartoon look, swap `STYLE_SOUTHPARK` (e.g. cartoonify, ghiblify, FLUX comic LoRA — see `CLAUDE.md` for the full table of stylized image models on fal.ai).
-
-### 5.3 New voices
-
-**Easy path — pick a stock ElevenLabs voice.**
-The shipped cast uses three stock voices (Laura, Charlie, Jessica). Browse https://elevenlabs.io/voice-library, copy a voice ID, drop it into `voice_id="..."` in your script. Recommended starting settings:
-
-| Use case | stability | similarity | style | tempo |
-|----------|-----------|------------|-------|-------|
-| Manic anchor | 0.20 | 0.75 | 0.85-0.90 | 1.25× |
-| Calm child / narrator | 0.55 | 0.7 | 0.25 | 1.0× |
-| Determined adult | 0.5 | 0.8 | 0.5 | 1.0-1.1× |
-
-**Advanced path — clone a real voice.**
-`scripts/clone_voices.py` does ElevenLabs Instant Voice Cloning (3 × ~90s YouTube clips → cloned voice ID). API key needs `Voices → Write` permission. Cloning is free (no TTS credits). **Ethics/ToS gotcha**: don't name the cloned voice after a public figure — ElevenLabs blocks those clones. Use a generic label like "Hebrew Narrator Male v3".
-
-For Hebrew **emotion preservation** (e.g. record a human with the right delivery, then convert to a cloned voice), use Chatterbox S2S via `scripts/episode1_s2s.py` — it's language-agnostic. ElevenLabs STS does **not** work for Hebrew (passes audio through unchanged).
-
-### 5.4 End-to-end stitch — a from-scratch script template
-
-```python
-# scripts/my_episode.py — adapt fix_v2.py
-SEGMENTS = {
-    "intro_anchor":  {"image": "...", "text": "...", "voice_id": "...", ...},
-    "rebuttal":      {"image": "...", "text": "...", "voice_id": "...", ...},
-    "eden_question": {"image": "...", "text": "...", "voice_id": "...", ...},
-}
-
-# In main():
-await generate_image(prompt, image_path)        # for each unique image
-await generate_tts(text, voice_id, audio_path)  # for each segment
-await lipsync(image_path, audio_path, video_path)  # VEED Fabric 1.0
-await concat([v1, v2, v3], final_path)          # ffmpeg
-```
-
-See `scripts/fix_v2.py` for a 220-line working reference of all four steps.
-
----
-
-## 6. Repo layout
+## 4. Repo layout
 
 ```
 mind-video/
-├── scripts/
-│   ├── pilot_v2.py             # 3-segment pilot (anchor♀ → anchor♂ → Eden)
-│   ├── fix_episodes.py         # Pilot v4 (hostages) + Ep02 v2 (victory)
-│   ├── fix_v2.py               # Pilot v5 (puzzled Eden) + Ep02 v3 — LATEST
-│   ├── generate_anchors.py     # Anchor design exploration (10 variants)
-│   ├── generate_girl_v2.py     # Eden design exploration (5 variants)
-│   ├── compare_lipsync.py      # 8-provider lip-sync benchmark
-│   ├── clone_voices.py         # ElevenLabs IVC for new voices
-│   └── episode1_s2s.py         # Chatterbox S2S (Hebrew voice conversion)
-├── src/providers/              # Reusable provider classes (image/audio/video)
-├── briefs/
-│   └── emperors_clothes_pilot.md  # 6 ready-to-produce episode scripts
-├── examples/                   # Two finished MP4s + character stills
-├── output/                     # Generated artifacts (gitignored)
-├── lessons.md                  # What works / what doesn't (read first)
-├── TASKS.md                    # Living checkpoint of all production runs
-├── CLAUDE.md                   # AI-assistant instructions
-└── README.md                   # This file
+├── characters/                  # Character library — one dir per character
+│   ├── anchor_female/
+│   │   ├── manifest.json        # voice + metadata
+│   │   └── image.png            # the still used for lip-sync
+│   ├── anchor_male/
+│   ├── eden/
+│   └── _candidates/             # gitignored work area for /new-character
+├── episodes/                    # User scripts + their generated outputs
+│   ├── example_hostages/
+│   │   ├── script.md            # the input (you write this)
+│   │   ├── audio/  videos/      # intermediates (gitignored)
+│   │   └── final.mp4            # the output
+│   └── <your-episode>/
+├── scripts/                     # CLI tooling
+│   ├── character_lab.py         # generate N candidate stills
+│   ├── save_character.py        # promote candidate → library
+│   ├── make_episode.py          # render script.md → final.mp4
+│   ├── compare_lipsync.py       # 8-provider lip-sync benchmark
+│   ├── mini_test_lipsync.py     # one-clip smoke test
+│   └── _archive/                # historical one-off scripts
+├── src/
+│   ├── character.py             # Character/Voice dataclasses + loader
+│   ├── script_format.py         # script.md parser
+│   └── pipeline/episode.py      # generate_tts / lipsync / concat
+├── .claude/commands/            # Slash commands for Claude Code/Cowork
+│   ├── new-character.md
+│   ├── new-script.md
+│   └── make-video.md
+├── docs/advanced-styles.md      # FLUX LoRA / Cartoonify / Ghiblify routes
+├── examples/                    # Two finished example MP4s
+├── app.py                       # Streamlit UI
+├── lessons.md  TASKS.md         # Working notes
+└── README.md
 ```
 
 ---
 
-## 7. Troubleshooting
+## 5. Script format
 
-| Symptom | Likely cause / fix |
-|---------|--------------------|
+`episodes/<slug>/script.md`:
+
+```markdown
+---
+title: My Episode Title
+description: Optional one-liner
+---
+
+## anchor_female  (love-struck — annotation is free text, ignored)
+אני מאוהבת! איזה מנהיג חזק יש לנו!
+
+## anchor_male
+לגמרי! לא נשאר להם אורז למרק!
+
+## eden  (quiet)
+אבל אמא, החטופים?
+```
+
+**Rules**:
+- Each `## ` heading starts a new segment.
+- The first word after `##` MUST be a character slug from `characters/`.
+- Anything else on the heading line is annotation (helpful for humans, ignored by the pipeline).
+- The same character may appear multiple times — each `##` is its own segment with its own audio + video.
+- Hebrew text goes between headings. Multi-line is OK; lines are joined with `\n`.
+
+---
+
+## 6. How it works — the orchestration
+
+```
+┌──────────────────────────────────────────────┐
+│  scripts/make_episode.py <slug>              │
+│  • parse episodes/<slug>/script.md           │
+│  • for each segment, run steps 1-3           │
+│  • idempotent: skip any output that exists   │
+└────────────────┬─────────────────────────────┘
+                 │
+        ┌────────┴────────┐
+        ▼                 ▼
+┌────────────────┐  ┌──────────────────┐
+│ 1. TTS         │  │ 2. LIP-SYNC      │
+│ ElevenLabs v3  │  │ VEED Fabric 1.0  │
+│ Hebrew         │  │ via fal.ai       │
+│ + atempo       │  │ $0.08/s, 480p    │
+│ → seg_NN.mp3   │  │ → seg_NN.mp4     │
+└────────────────┘  └──────────────────┘
+                            │
+                            ▼
+            ┌────────────────────────────┐
+            │ 3. CONCAT                  │
+            │ ffmpeg -f concat -c copy   │
+            │ (re-encode fallback)       │
+            │ → final.mp4 (9:16)         │
+            └────────────────────────────┘
+```
+
+Implementation notes (battle-tested — see `lessons.md`):
+- VEED Fabric 1.0 was chosen after benchmarking 8 lip-sync providers on Hebrew (`scripts/compare_lipsync.py`). LatentSync, Sync 1.9, MuseTalk had visibly worse quality; Aurora is a 25%-pricier backup.
+- `tempo=1.25` post-applied via `ffmpeg atempo` makes anchors sound urgent/manic; narrators stay at 1.0.
+- Each line gets its own MP4 → individual lines can be regenerated cheaply by deleting one file and re-running.
+- ElevenLabs `eleven_v3` is the only model that supports `language_code='he'` (`eleven_multilingual_v2` returns 400 on this).
+
+---
+
+## 7. Cost reference
+
+| Step | Cost |
+|------|------|
+| Character candidate (Nano Banana Pro) | ~$0.04 / image |
+| Hebrew TTS (ElevenLabs eleven_v3) | included in Creator plan ($22/mo) |
+| Lip-sync (VEED Fabric 1.0) | $0.08/s of audio @ 480p |
+| Concat (FFmpeg) | free |
+
+A typical 30s episode with 3 segments: **~$3-5** (mostly lip-sync).
+
+A typical character creation (3 candidates): **~$0.12**.
+
+---
+
+## 8. Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
 | `403` from fal.ai | Out of balance → top up at https://fal.ai/dashboard/billing |
-| `400` from ElevenLabs on `language_code='he'` | You're using `eleven_multilingual_v2` — switch to `eleven_v3` (only v3 supports `language_code`) |
-| Anchors talk too slow / dead | Confirm `tempo=1.25` is being applied (ffmpeg `atempo` filter) — easy to miss on a re-run if file already exists |
-| Video processing seems frozen | VEED Fabric ≈ 15s per second of audio. A 25s line takes ~4 min |
-| Eden's mouth not synced well | Re-generate her image — the lip-sync model needs hands-not-near-face and a clearly visible mouth |
-| Re-runs double-apply tempo (chipmunk audio) | Pipeline already guards against this via skip-if-exists — but if you blow away `_raw.mp3` keep both `_raw.mp3` and the final `.mp3`, and only atempo on freshly generated raw files |
-| ElevenLabs blocks a voice clone | Don't name the clone after a public figure (ToS). Use a generic name |
+| `400` from ElevenLabs on `language_code='he'` | You're on Free/Starter — `eleven_v3` requires Creator ($22/mo) |
+| `ffmpeg atempo failed` | ffmpeg install is broken (often a Homebrew x265/x264 dylib mismatch). Fix: `brew reinstall ffmpeg` |
+| Pipeline hangs / seems frozen | VEED Fabric ≈ 15s per second of audio. A 25s line takes ~4 min |
+| Character looks different per segment | Re-pick a more iconic candidate. For high-consistency needs, switch to FLUX Kontext Pro — see `docs/advanced-styles.md` |
+| Mouth not lip-syncing well | Image has hands near face or mouth covered. Re-pick or regenerate |
+| ElevenLabs blocks a voice clone | Don't name the clone after a public figure (ToS). Use a generic label |
 
-For deeper troubleshooting, [`lessons.md`](lessons.md) catalogs every pitfall hit in production so far, and [`TASKS.md`](TASKS.md) is the running checkpoint of which model/version/iteration produced which output.
+[`lessons.md`](lessons.md) catalogs every pitfall hit in production. [`TASKS.md`](TASKS.md) is the running checkpoint.

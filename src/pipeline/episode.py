@@ -78,9 +78,13 @@ async def generate_tts(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
+        _, stderr = await proc.communicate()
         if proc.returncode != 0:
-            raise RuntimeError(f"ffmpeg atempo failed for {raw}")
+            tail = stderr.decode(errors="replace").strip().splitlines()[-3:]
+            raise RuntimeError(
+                f"ffmpeg atempo failed (exit {proc.returncode}): "
+                + " | ".join(tail)
+            )
     else:
         shutil.copy2(raw, output_path)
     return output_path
@@ -154,7 +158,7 @@ async def concat(video_paths: list, output_path: Path) -> Path:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    await proc.wait()
+    _, stderr = await proc.communicate()
     if proc.returncode != 0:
         # Fall back to re-encode (codec mismatch between segments)
         proc = await asyncio.create_subprocess_exec(
@@ -167,8 +171,12 @@ async def concat(video_paths: list, output_path: Path) -> Path:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
+        _, stderr = await proc.communicate()
         if proc.returncode != 0:
-            raise RuntimeError("ffmpeg concat failed even with re-encode")
+            tail = stderr.decode(errors="replace").strip().splitlines()[-3:]
+            raise RuntimeError(
+                f"ffmpeg concat failed (exit {proc.returncode}): "
+                + " | ".join(tail)
+            )
     lst.unlink(missing_ok=True)
     return output_path

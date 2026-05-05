@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
 from src.pipeline.episode import generate_tts, lipsync, concat
+from src.character import list_all as list_characters
 
 st.set_page_config(page_title="Mind Video", page_icon="🎬", layout="wide")
 
@@ -29,30 +30,40 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- Cast (pinned for visual consistency) -------------------------------------
+# --- Cast (loaded from characters/) -------------------------------------------
 
-CHARACTERS = {
-    "Female anchor (Channel 14)": {
-        "image": str(ROOT / "examples" / "anchor_female_inlove.png"),
-        "voice_id": "FGY2WhTYpPnrIDTdsKH5",  # Laura
-        "stability": 0.25, "similarity": 0.75, "style": 0.85, "tempo": 1.25,
-        "default_text": "אני מאוהבת, איזה מנהיג חזק, איזה מנהיג דגול יש לנו, קרה לנו נס!",
-    },
-    "Male anchor (Channel 14)": {
-        "image": str(ROOT / "examples" / "anchor_male_desk.png"),
-        "voice_id": "IKne3meq5aSn9XLyUdCD",  # Charlie
-        "stability": 0.20, "similarity": 0.75, "style": 0.90, "tempo": 1.25,
-        "default_text": "לגמרי! איזו מנהיגות, אין לנו יותר אויבים!",
-    },
-    "Eden (the kid)": {
-        "image": str(ROOT / "examples" / "eden_puzzled.png"),
-        "voice_id": "cgSgspJ2msm6clMCkdW9",  # Jessica
-        "stability": 0.55, "similarity": 0.7, "style": 0.25, "tempo": 1.0,
-        "default_text": "אבל אמא, ככה נראה ניצחון? ככה נראה ביטחון?",
-    },
+DEFAULT_TEXTS = {
+    "anchor_female": "אני מאוהבת, איזה מנהיג חזק, איזה מנהיג דגול יש לנו, קרה לנו נס!",
+    "anchor_male": "לגמרי! איזו מנהיגות, אין לנו יותר אויבים!",
+    "eden": "אבל אמא, ככה נראה ניצחון? ככה נראה ביטחון?",
 }
 
-DEFAULT_CAST = ["Female anchor (Channel 14)", "Male anchor (Channel 14)", "Eden (the kid)"]
+# Preferred order if these slugs exist (the original Channel 14 + Eden default cast)
+PREFERRED_DEFAULT_CAST = ["anchor_female", "anchor_male", "eden"]
+
+
+@st.cache_resource
+def load_cast():
+    """Load all characters from characters/ on disk. Cached for the session."""
+    chars = list_characters()
+    return {c.slug: c for c in chars}
+
+
+def default_cast_slugs(cast: dict) -> list[str]:
+    """Return the slugs to seed the editor with on first load."""
+    preferred = [s for s in PREFERRED_DEFAULT_CAST if s in cast]
+    if preferred:
+        return preferred
+    # Fallback: take the first 3 (or however many exist)
+    return list(cast.keys())[:3]
+
+
+def char_label(c) -> str:
+    return f"{c.display_name} (@{c.slug})"
+
+
+def default_text_for(slug: str) -> str:
+    return DEFAULT_TEXTS.get(slug, "כתוב כאן את הטקסט בעברית.")
 
 
 # --- Auth gate (shared password) ---------------------------------------------
@@ -116,7 +127,7 @@ def _init_keys():
 
 # --- Environment checks -------------------------------------------------------
 
-def _preflight():
+def _preflight(cast: dict):
     missing = [k for k in ("FAL_KEY", "ELEVENLABS_API_KEY") if not os.environ.get(k)]
     if missing:
         st.warning(
@@ -134,21 +145,29 @@ def _preflight():
             + probe.stderr.strip().splitlines()[0] + "\n```"
         )
         st.stop()
-    for ch, cfg in CHARACTERS.items():
-        if not Path(cfg["image"]).exists():
-            st.error(f"Character image missing: `{cfg['image']}` (for *{ch}*).")
+    if not cast:
+        st.error(
+            "No characters found in `characters/`. "
+            "Create some with `python scripts/character_lab.py` "
+            "or run the `/new-character` slash command."
+        )
+        st.stop()
+    for slug, c in cast.items():
+        if not c.image_path.exists():
+            st.error(f"Character image missing: `{c.image_path}` (for *{slug}*).")
             st.stop()
 
 
 # --- State --------------------------------------------------------------------
 
-def _init_state():
+def _init_state(cast: dict):
     if "mode" not in st.session_state:
         st.session_state.mode = "input"
     if "segments" not in st.session_state:
+        slugs = default_cast_slugs(cast)
         st.session_state.segments = [
-            {"character": ch, "text": CHARACTERS[ch]["default_text"]}
-            for ch in DEFAULT_CAST
+            {"character": slug, "text": default_text_for(slug)}
+            for slug in slugs
         ]
     if "episode_name" not in st.session_state:
         st.session_state.episode_name = "my_episode"
@@ -163,30 +182,44 @@ def _estimate_cost(segments) -> float:
 
 # --- Screens ------------------------------------------------------------------
 
-def render_input():
+def render_input(cast: dict):
     st.title("🎬 Mind Video — Episode Builder")
-    st.caption("Channel 14 anchors + Eden the kid · *The Emperor's New Clothes* format")
+    st.caption(
+        f"{len(cast)} character{'s' if len(cast) != 1 else ''} loaded from `characters/` · "
+        "add more with `/new-character` or `python scripts/character_lab.py`"
+    )
 
     st.text_input("Episode name", key="episode_name",
-                  help="Used as the output directory name (output/<name>/final.mp4)")
+                  help="Used as the output directory name (episodes/<name>/final.mp4)")
 
     st.divider()
 
     segments = st.session_state.segments
     to_remove = None
+    slugs = list(cast.keys())
+
+    def _label_for(slug: str) -> str:
+        return char_label(cast[slug]) if slug in cast else f"(missing) @{slug}"
 
     for i, seg in enumerate(segments):
         with st.container(border=True):
             cols = st.columns([1.2, 4, 0.5])
             with cols[0]:
-                ch_options = list(CHARACTERS.keys())
+                # Skip segments whose character no longer exists
+                if seg["character"] not in cast:
+                    st.error(f"Character `{seg['character']}` no longer exists.")
+                    if st.button("Drop segment", key=f"_drop_{i}"):
+                        to_remove = i
+                    continue
+                idx = slugs.index(seg["character"])
                 seg["character"] = st.selectbox(
                     f"Character #{i+1}",
-                    ch_options,
-                    index=ch_options.index(seg["character"]),
-                    key=f"_char_{i}_{seg['character']}",
+                    slugs,
+                    index=idx,
+                    format_func=_label_for,
+                    key=f"_char_{i}",
                 )
-                st.image(CHARACTERS[seg["character"]]["image"], width=140)
+                st.image(str(cast[seg["character"]].image_path), width=140)
             with cols[1]:
                 seg["text"] = st.text_area(
                     f"Hebrew text #{i+1}",
@@ -208,20 +241,22 @@ def render_input():
     cols = st.columns([1, 1, 3])
     with cols[0]:
         if st.button("+ Add segment"):
-            st.session_state.segments.append({
-                "character": "Eden (the kid)",
-                "text": CHARACTERS["Eden (the kid)"]["default_text"],
-            })
-            st.rerun()
+            new_slug = slugs[0] if slugs else None
+            if new_slug:
+                st.session_state.segments.append({
+                    "character": new_slug,
+                    "text": default_text_for(new_slug),
+                })
+                st.rerun()
     with cols[1]:
         st.metric("Estimated cost", f"${_estimate_cost(segments):.2f}")
 
     st.divider()
 
     name = st.session_state.episode_name.strip()
-    out_dir = ROOT / "output" / name if name else None
+    out_dir = ROOT / "episodes" / name if name else None
     if out_dir and out_dir.exists():
-        st.info(f"`output/{name}/` exists — generation will reuse cached steps "
+        st.info(f"`episodes/{name}/` exists — generation will reuse cached steps "
                 f"(re-clicking Generate is cheap and safe).")
 
     if st.button("▶ Generate video", type="primary", disabled=not name,
@@ -231,7 +266,7 @@ def render_input():
         st.rerun()
 
 
-async def _run_pipeline(segments, episode_dir: Path, log_cb):
+async def _run_pipeline(segments, cast, episode_dir: Path, log_cb):
     audio_dir = episode_dir / "audio"
     video_dir = episode_dir / "videos"
     audio_dir.mkdir(parents=True, exist_ok=True)
@@ -239,9 +274,8 @@ async def _run_pipeline(segments, episode_dir: Path, log_cb):
 
     video_paths = []
     for i, seg in enumerate(segments):
-        ch = CHARACTERS[seg["character"]]
-        slug = seg["character"].split()[0].lower()
-        seg_id = f"seg{i:02d}_{slug}"
+        char = cast[seg["character"]]
+        seg_id = f"seg{i:02d}_{char.slug}"
         audio_path = audio_dir / f"{seg_id}.mp3"
         video_path = video_dir / f"{seg_id}.mp4"
 
@@ -252,9 +286,9 @@ async def _run_pipeline(segments, episode_dir: Path, log_cb):
         t0 = time.time()
         log_cb(i, "audio", "running", "")
         await generate_tts(
-            text=seg["text"], voice_id=ch["voice_id"], output_path=audio_path,
-            stability=ch["stability"], similarity=ch["similarity"],
-            style=ch["style"], tempo=ch["tempo"],
+            text=seg["text"], voice_id=char.voice.voice_id, output_path=audio_path,
+            stability=char.voice.stability, similarity=char.voice.similarity,
+            style=char.voice.style, tempo=char.voice.tempo,
         )
         log_cb(i, "audio", "done", f"{time.time()-t0:.1f}s")
 
@@ -263,7 +297,7 @@ async def _run_pipeline(segments, episode_dir: Path, log_cb):
         log_cb(i, "lipsync", "running", "starting…")
         def cb(elapsed, msg, _i=i):
             log_cb(_i, "lipsync", "running", f"{elapsed:.0f}s · {msg}")
-        await lipsync(Path(ch["image"]), audio_path, video_path, progress_cb=cb)
+        await lipsync(char.image_path, audio_path, video_path, progress_cb=cb)
         log_cb(i, "lipsync", "done", f"{time.time()-t1:.0f}s")
 
         video_paths.append(video_path)
@@ -276,7 +310,7 @@ async def _run_pipeline(segments, episode_dir: Path, log_cb):
     return final_path
 
 
-def render_running():
+def render_running(cast: dict):
     st.title("🎬 Generating…")
     name = st.session_state.episode_name
     episode_dir = Path(st.session_state.episode_dir)
@@ -287,7 +321,9 @@ def render_running():
     seg_phs = []
     for i, seg in enumerate(segments):
         with st.container(border=True):
-            st.markdown(f"**#{i+1} · {seg['character']}**")
+            char = cast.get(seg["character"])
+            label = char.display_name if char else seg["character"]
+            st.markdown(f"**#{i+1} · {label}**  *(@{seg['character']})*")
             ph = {step: st.empty() for step in ("image", "audio", "lipsync")}
             for step in ("image", "audio", "lipsync"):
                 ph[step].markdown(f"⏸ &nbsp; {step}")
@@ -310,7 +346,7 @@ def render_running():
 
     t_start = time.time()
     try:
-        final_path = asyncio.run(_run_pipeline(segments, episode_dir, log_cb))
+        final_path = asyncio.run(_run_pipeline(segments, cast, episode_dir, log_cb))
         st.session_state.final_path = str(final_path)
         st.session_state.elapsed = time.time() - t_start
         st.session_state.cost = _estimate_cost(segments)
@@ -351,13 +387,14 @@ def render_done():
 
 _gate()
 _init_keys()
-_preflight()
-_init_state()
+cast = load_cast()
+_preflight(cast)
+_init_state(cast)
 
 mode = st.session_state.mode
 if mode == "input":
-    render_input()
+    render_input(cast)
 elif mode == "running":
-    render_running()
+    render_running(cast)
 elif mode == "done":
     render_done()

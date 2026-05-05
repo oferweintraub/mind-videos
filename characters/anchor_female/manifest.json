@@ -1,0 +1,15 @@
+{
+  "slug": "anchor_female",
+  "display_name": "Female Anchor (Channel 14)",
+  "description": "Mizrahi woman, mid-30s, dramatic eye makeup, large gold hoop earrings, tight black top with a giant white '14' across the chest, seated at a glossy news desk, leaning forward, love-struck and adoring expression.",
+  "style": "south_park",
+  "voice": {
+    "voice_id": "FGY2WhTYpPnrIDTdsKH5",
+    "voice_name": "Laura (ElevenLabs stock)",
+    "stability": 0.25,
+    "similarity": 0.75,
+    "style": 0.85,
+    "tempo": 1.25
+  },
+  "image": "image.png"
+}
