@@ -33,7 +33,7 @@ st.set_page_config(
     page_title="Mind Video",
     page_icon="🎬",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 apply_theme()
@@ -193,8 +193,8 @@ with header_right:
     st.markdown(
         '<p class="wz-tiny" style="text-align:right; margin:0;">'
         'Hebrew animated videos · '
-        '<span style="color:#E8B14F;">↖ click <strong>Settings</strong></span> '
-        'to add your API keys'
+        '<span style="color:#E8B14F;">add your API keys ←</span> '
+        'in the Settings panel'
         '</p>',
         unsafe_allow_html=True,
     )
