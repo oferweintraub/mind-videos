@@ -192,7 +192,9 @@ with header_left:
 with header_right:
     st.markdown(
         '<p class="wz-tiny" style="text-align:right; margin:0;">'
-        'Hebrew animated videos · Open Settings (☰) for API keys'
+        'Hebrew animated videos · '
+        '<span style="color:#E8B14F;">↖ click <strong>Settings</strong></span> '
+        'to add your API keys'
         '</p>',
         unsafe_allow_html=True,
     )

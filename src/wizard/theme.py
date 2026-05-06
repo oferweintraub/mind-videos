@@ -42,10 +42,30 @@ _CSS = f"""
   }}
   header[data-testid="stHeader"] {{
     background: transparent;
-    height: 0;
+    height: auto;
   }}
+  /* Pin the sidebar-toggle chevron as a floating button so it's always findable */
   [data-testid="collapsedControl"] {{
     color: {PALETTE['accent']} !important;
+    position: fixed !important;
+    top: 0.7rem !important;
+    left: 0.7rem !important;
+    z-index: 999999 !important;
+    background: {PALETTE['bg_card']} !important;
+    border: 1px solid {PALETTE['border']} !important;
+    border-radius: 8px !important;
+    padding: 0.35rem 0.55rem !important;
+  }}
+  [data-testid="collapsedControl"]:hover {{
+    background: {PALETTE['bg_card_hi']} !important;
+    border-color: {PALETTE['accent']} !important;
+  }}
+  /* "Settings" hint label next to the chevron, only when sidebar collapsed */
+  [data-testid="collapsedControl"]::after {{
+    content: " Settings";
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin-left: 0.2rem;
   }}
   .block-container {{
     padding-top: 1.2rem !important;
