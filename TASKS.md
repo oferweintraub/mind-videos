@@ -192,7 +192,45 @@ Tested 3 speech-to-speech providers for Hebrew voice conversion:
 
 ---
 
+### [DONE] Streamlit UI + Streamlit Cloud deploy config (2026-04-28)
+
+`app.py` for local episode generation with 3-character pinned cast (Channel 14 anchors + Eden). Added password gate (`APP_PASSWORD` via `st.secrets`) and bring-your-own-keys sidebar so collaborators can use a hosted instance without exposing the owner's fal.ai/ElevenLabs balance. `packages.txt` provisions `ffmpeg` on the build host. README §2.6 documents the deploy.
+
+---
+
+### [DONE] Reorg into Character Library + Slash Commands (2026-05-05 → 2026-05-06)
+
+Restructured the project so anyone with permission can clone it and produce videos end-to-end via Claude Code or Claude Cowork — no Python knowledge required. Three slash commands now drive the full workflow:
+
+- `/new-character "<desc>" [style]` — generate N candidates → pick → save to `characters/<slug>/`
+- `/new-script <slug> [topic | --from <draft>]` — draft Hebrew dialogue, optionally importing `.txt`/`.md`/`.docx`/`.pdf`
+- `/make-video <slug>` — render `episodes/<slug>/script.md` → `final.mp4`
+
+**New layout**:
+- `characters/<slug>/{manifest.json, image.png}` — manifest-driven library
+- `episodes/<slug>/{script.md, audio/, videos/, final.mp4}` — per-episode self-contained
+- `src/character.py` + `src/script_format.py` — Character/Voice dataclasses + Markdown script parser
+- `scripts/{character_lab, save_character, make_episode, extract_text, list_voices}.py` — CLI tooling
+- `.claude/commands/{new-character, new-script, make-video}.md` — slash command instructions
+- `config/voices.yaml` — curated ElevenLabs voice catalog (with `--good-for` filter via `list_voices.py`)
+- `docs/advanced-styles.md` — FLUX LoRA / Cartoonify / Ghiblify routes for stronger style fidelity
+- `scripts/_archive/` — historical one-off scripts (20 files, kept for reference)
+
+**Character lab supports multi-style** (`--style lego,south_park,muppet`) when the user is undecided — produces one candidate per style. **`make_episode.py` accepts both positional slug and `--episode` flag** for scriptability, plus prints audio-duration-aware ETAs during lip-sync.
+
+**Validated end-to-end**: ran `make_episode.py example_hostages` against real APIs — produced `episodes/example_hostages/final.mp4` (4.2 MB, 480×864, 20.6s) for ~$1.50 in fal.ai cost. **Cowork test confirmed working** — user created a new character (`red_haired_woman`) and rendered a new episode (`red_woman_intro`) entirely through the slash command flow.
+
+**Commits**: `8f8af19` (reorg), `ce196e0` (draft import), `86a42c5` (README), `202c328` (Cowork-test polish: voice catalog, multi-style, ETA, `--episode` flag).
+
+**`app.py` refactored** to load characters from disk (no more hardcoded cast). It still defaults to Channel-14 + Eden if those slugs exist, but works generically for any cast in `characters/`.
+
+---
+
 ## Pending
 
 - **Record 22 lines for S2S conversion**: Record all speaking lines with correct Hebrew pronunciation and emotion → save to `output/episode1/recordings/` → run `python scripts/episode1_s2s.py convert` → regenerate videos for v5
 - **[BLOCKED — waiting for fal.ai support] Seedance 2.0 by ByteDance**: Native multimodal video gen with built-in lip-sync. Official API launches ~Feb 24. Check fal.ai for `fal-ai/bytedance/seedance/v2` after Feb 24.
+
+## Backlog (nice-to-have, not committed)
+
+- **Commit `red_haired_woman` + `red_woman_intro` as a second shipped example?** They're untracked test artifacts from the Cowork test. If the result is good, they'd serve as a non-Channel-14 demo for new users. If throwaway, `rm -rf` them.
