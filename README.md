@@ -3,10 +3,14 @@
 Turn a few lines of Hebrew dialogue into a finished 9:16 video where animated characters speak with lip-synced mouths. Driven from inside Claude Desktop with three slash commands. **No coding required.**
 
 ```
-/new-character   → design a new character (3 candidate images, pick one)
+/new-character   → design a new character (candidate images, pick one)
 /new-script      → draft Hebrew dialogue across N characters
 /make-video      → render the script into a finished MP4
 ```
+
+> 📌 **Important:** these are *Claude-Code slash commands*, not regular shell commands.
+> They run inside a Claude Desktop **Code-tab session that has this folder open** (covered in Step 6 below).
+> They will not work from a regular Terminal window.
 
 Two finished examples in [`examples/`](examples/) — both produced from this exact pipeline:
 

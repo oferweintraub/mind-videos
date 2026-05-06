@@ -29,6 +29,18 @@ sys.path.insert(0, str(ROOT))
 from src.character import Character, Voice
 
 
+def _voice_catalog() -> dict:
+    """Load config/voices.yaml. Returns empty dict if missing/unparseable."""
+    try:
+        import yaml  # type: ignore
+        path = ROOT / "config" / "voices.yaml"
+        if not path.exists():
+            return {}
+        return yaml.safe_load(path.read_text()) or {}
+    except Exception:
+        return {}
+
+
 def main():
     p = argparse.ArgumentParser(description="Promote a character candidate to the library")
     p.add_argument("--slug", required=True)
@@ -61,6 +73,19 @@ def main():
     target_manifest = target_dir / "manifest.json"
     if target_dir.exists() and (target_manifest.exists() or target_image.exists()) and not args.force:
         sys.exit(f"ERROR: characters/{args.slug}/ already exists. Pass --force to overwrite.")
+
+    # Soft-validate the voice ID against the catalog. Don't error — clones
+    # and freshly-discovered voices won't be in the file.
+    catalog = _voice_catalog()
+    catalog_voices = catalog.get("voices", []) if catalog else []
+    catalog_ids = {v["id"]: v for v in catalog_voices}
+    if catalog_ids and args.voice_id not in catalog_ids:
+        print(f"   [note] voice_id '{args.voice_id}' is not in config/voices.yaml — "
+              f"using anyway (custom voice or clone). Run "
+              f"`python scripts/list_voices.py` to see the catalog.")
+    elif args.voice_id in catalog_ids and not args.voice_name:
+        # Convenience: fill in name from the catalog if user didn't pass one
+        args.voice_name = catalog_ids[args.voice_id]["name"]
 
     target_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src_image, target_image)

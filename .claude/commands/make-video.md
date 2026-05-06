@@ -40,7 +40,14 @@ Tell the user the estimate and ask: **"Proceed? (y/n)"** — unless the user has
 ## Step 4 — Run the pipeline
 
 ```bash
-source venv/bin/activate && python scripts/make_episode.py <target>
+# By slug (positional):
+source venv/bin/activate && python scripts/make_episode.py <slug>
+
+# Or with --episode flag (equivalent — useful if you're scripting):
+source venv/bin/activate && python scripts/make_episode.py --episode <slug>
+
+# Or pass an explicit script.md path:
+source venv/bin/activate && python scripts/make_episode.py path/to/script.md
 ```
 
 The runner prints progress to stdout — let it stream. Each segment goes through three steps:

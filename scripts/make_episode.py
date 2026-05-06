@@ -35,6 +35,15 @@ from src.script_format import parse_file, validate_against_characters
 from src.pipeline.episode import generate_tts, lipsync, concat
 
 
+def _audio_duration(path: Path) -> float:
+    """Best-effort audio duration in seconds. Returns 0.0 on failure."""
+    try:
+        from mutagen.mp3 import MP3  # type: ignore
+        return float(MP3(str(path)).info.length)
+    except Exception:
+        return 0.0
+
+
 def resolve_script_path(arg: str) -> tuple[Path, Path]:
     """Resolve either a slug or a path. Returns (script_path, episode_dir)."""
     p = Path(arg)
@@ -100,16 +109,25 @@ async def run(script_path: Path, episode_dir: Path):
             style=char.voice.style,
             tempo=char.voice.tempo,
         )
-        print(f"   audio:   {audio_path.relative_to(ROOT)}  ({time.time()-t0:.1f}s)")
+        gen_secs = time.time() - t0
+        audio_secs = _audio_duration(audio_path)
+        if audio_secs:
+            print(f"   audio:   {audio_path.relative_to(ROOT)}  "
+                  f"[{audio_secs:.1f}s of speech, generated in {gen_secs:.1f}s]")
+        else:
+            print(f"   audio:   {audio_path.relative_to(ROOT)}  "
+                  f"[generated in {gen_secs:.1f}s]")
 
         t1 = time.time()
         last_print = [0.0]
+        eta = max(audio_secs * 4, 30.0) if audio_secs else 60.0
+        print(f"   lipsync: starting (typical wall-clock for {audio_secs:.1f}s of audio: ~{eta:.0f}s)")
         def cb(elapsed, msg, _last=last_print):
             if elapsed - _last[0] >= 5.0:
-                print(f"   lipsync: {elapsed:5.0f}s  {msg}")
+                print(f"   lipsync: waited {elapsed:5.0f}s — fal.ai status: {msg}")
                 _last[0] = elapsed
         await lipsync(char.image_path, audio_path, video_path, progress_cb=cb)
-        print(f"   video:   {video_path.relative_to(ROOT)}  ({time.time()-t1:.0f}s)")
+        print(f"   video:   {video_path.relative_to(ROOT)}  [rendered in {time.time()-t1:.0f}s]")
 
         video_paths.append(video_path)
 
@@ -123,11 +141,19 @@ async def run(script_path: Path, episode_dir: Path):
 
 def main():
     p = argparse.ArgumentParser(description="Make an episode from a script.md")
-    p.add_argument("target", help="Episode slug (under episodes/) OR path to a script.md")
+    p.add_argument("target", nargs="?",
+                   help="Episode slug (under episodes/) OR path to a script.md")
+    p.add_argument("--episode", "-e", dest="episode",
+                   help="Alias for the positional target (slug or path).")
     p.add_argument("--out", help="Override output dir (default: alongside the script)")
     args = p.parse_args()
 
-    script_path, default_out = resolve_script_path(args.target)
+    target = args.target or args.episode
+    if not target:
+        p.error("must provide an episode slug — either as a positional argument "
+                "(`make_episode.py my_slug`) or via --episode (`make_episode.py --episode my_slug`)")
+
+    script_path, default_out = resolve_script_path(target)
     out_dir = Path(args.out) if args.out else default_out
     out_dir.mkdir(parents=True, exist_ok=True)
 

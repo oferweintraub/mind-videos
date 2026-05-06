@@ -1,0 +1,68 @@
+# ElevenLabs voice catalog — used by /new-character to suggest voices.
+#
+# All entries below are stock ElevenLabs voices (no clone needed).
+# Hebrew TTS is driven via `model_id: eleven_v3` + `language_code: 'he'`.
+# The English-language tone descriptions below carry over reasonably well to
+# Hebrew prosody, but the *accent* will be neutral Hebrew (the language code
+# overrides the voice's native English accent).
+#
+# Voice IDs are stable. To browse more, see https://elevenlabs.io/voice-library
+# and copy the ID into a character manifest's `voice.voice_id`.
+
+voices:
+  - id: FGY2WhTYpPnrIDTdsKH5
+    name: Laura
+    tone: bright, dramatic adult female
+    good_for: [news_anchor, energetic_woman, presenter]
+
+  - id: IKne3meq5aSn9XLyUdCD
+    name: Charlie
+    tone: energetic adult male, slightly raspy
+    good_for: [news_anchor, fired_up_man, podcast_host]
+
+  - id: cgSgspJ2msm6clMCkdW9
+    name: Jessica
+    tone: calm, child-like, soft
+    good_for: [child, gentle_narrator, young_woman]
+
+  - id: nPczCjzI2devNBz1zQrb
+    name: Brian
+    tone: deep, mature American male, gravitas
+    good_for: [old_man, weary_grandfather, narrator]
+
+  - id: JBFqnCBsd6RMkjVDRZzb
+    name: George
+    tone: warm, mature British male
+    good_for: [grandfather, storyteller, kindly_uncle]
+
+  - id: onwK4e9ZLuTAKqWW03F9
+    name: Daniel
+    tone: authoritative British male, news-presenter cadence
+    good_for: [politician, anchor, formal_speaker]
+
+  - id: pqHfZKP75CvOlQylNhV4
+    name: Bill
+    tone: gravelly older American male
+    good_for: [old_man, complainer, grumpy_grandpa]
+
+  - id: TX3LPaxmHKxFdv7VOQHJ
+    name: Liam
+    tone: articulate young adult male, neutral
+    good_for: [young_man, soldier, journalist]
+
+  - id: XB0fDUnXU5powFXDhCwa
+    name: Charlotte
+    tone: soft, intimate adult female
+    good_for: [young_woman, narrator, mother]
+
+  - id: pFZP5JQG7iQjIQuC4Bku
+    name: Lily
+    tone: warm middle-aged British female
+    good_for: [mother, teacher, kindly_woman]
+
+# Sensible defaults. Per-character settings override these in the manifest.
+defaults:
+  stability: 0.5
+  similarity: 0.75
+  style: 0.3
+  tempo: 1.0   # 1.0 natural, 1.25 manic/urgent, 0.95 weary/slow

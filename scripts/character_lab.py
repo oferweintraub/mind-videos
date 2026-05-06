@@ -1,17 +1,27 @@
 """Character lab — generate N candidate stills for a new character.
 
-Usage:
+Two modes:
+
+  Single style (N candidates of one style):
     python scripts/character_lab.py \\
         --description "young woman, blonde wavy hair, green eyes, soft smile" \\
         --style lego \\
         --slug young_woman \\
         --count 3
 
+  Multi-style (one candidate per style — useful when you're undecided):
+    python scripts/character_lab.py \\
+        --description "70-year-old grandpa, white hair, weary eyes" \\
+        --style lego,south_park,muppet \\
+        --slug old_man
+
 Writes:
     characters/_candidates/<slug>/option_1.png
+    characters/_candidates/<slug>/option_1_style.txt   (which style was used)
     characters/_candidates/<slug>/option_2.png
-    characters/_candidates/<slug>/option_3.png
-    characters/_candidates/<slug>/_prompt.txt   (the prompt actually used)
+    characters/_candidates/<slug>/option_2_style.txt
+    ... etc
+    characters/_candidates/<slug>/_prompt.txt   (last prompt used)
 
 After review, promote one with:
     python scripts/save_character.py --slug young_woman --pick 2 [voice options]
@@ -92,6 +102,14 @@ async def generate_one(client: genai.Client, prompt: str, out_path: Path) -> Pat
     raise RuntimeError(f"Nano Banana Pro returned no image data for {out_path.name}")
 
 
+def parse_styles(style_arg: str) -> list[str]:
+    """Split a --style value on commas. Whitespace tolerant. Always returns >=1 entry."""
+    parts = [s.strip() for s in style_arg.split(",") if s.strip()]
+    if not parts:
+        sys.exit("ERROR: --style is empty")
+    return parts
+
+
 async def main_async(args):
     if "GOOGLE_API_KEY" not in os.environ:
         sys.exit("ERROR: GOOGLE_API_KEY is not set. Add it to .env or export it.")
@@ -99,31 +117,47 @@ async def main_async(args):
     out_dir = ROOT / "characters" / "_candidates" / args.slug
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    prompt = build_prompt(args.description, args.style)
-    (out_dir / "_prompt.txt").write_text(prompt + "\n")
-    print(f"\n>> Generating {args.count} candidates for slug='{args.slug}', style='{args.style}'")
+    styles = parse_styles(args.style)
+    multi_style = len(styles) > 1
+
+    if multi_style:
+        # One candidate per style. --count is ignored in this mode.
+        plan = [(i, styles[i - 1]) for i in range(1, len(styles) + 1)]
+        print(f"\n>> Multi-style mode: 1 candidate per style for slug='{args.slug}'")
+        print(f">> Styles: {styles}")
+    else:
+        plan = [(i, styles[0]) for i in range(1, args.count + 1)]
+        print(f"\n>> Generating {args.count} candidates for slug='{args.slug}', style='{styles[0]}'")
+
     print(f">> Output: {out_dir.relative_to(ROOT)}/")
-    print(f">> Prompt: {prompt[:120]}...\n")
+    # Save the last prompt used for human reference
+    sample_prompt = build_prompt(args.description, styles[0])
+    (out_dir / "_prompt.txt").write_text(sample_prompt + "\n")
+    print(f">> Prompt (sample): {sample_prompt[:120]}...\n")
 
     client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
     tasks = []
-    for i in range(1, args.count + 1):
+    plan_for_results: list[tuple[int, str]] = []
+    for i, style in plan:
         out = out_dir / f"option_{i}.png"
         if out.exists() and not args.force:
-            print(f"   [skip] {out.name} already exists (pass --force to regenerate)")
+            print(f"   [skip] {out.name} ({style}) already exists (pass --force to regenerate)")
             continue
+        prompt = build_prompt(args.description, style)
+        (out_dir / f"option_{i}_style.txt").write_text(style)
         tasks.append(generate_one(client, prompt, out))
+        plan_for_results.append((i, style))
 
     if not tasks:
         print(">> All candidates already exist. Nothing to do.")
         return
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    for i, r in enumerate(results, start=1):
+    for (i, style), r in zip(plan_for_results, results):
         if isinstance(r, Exception):
-            print(f"   [FAIL] option_{i}: {type(r).__name__}: {r}")
+            print(f"   [FAIL] option_{i} ({style}): {type(r).__name__}: {r}")
         else:
-            print(f"   [ok]   {r.relative_to(ROOT)}")
+            print(f"   [ok]   option_{i} ({style}) -> {r.relative_to(ROOT)}")
 
     print(f"\n>> Done. Review the candidates and pick one with:")
     print(f"   python scripts/save_character.py --slug {args.slug} --pick <N> "
@@ -135,7 +169,9 @@ def main():
     p.add_argument("--description", required=True,
                    help="One-paragraph English description of the character")
     p.add_argument("--style", required=True,
-                   help=f"Style: one of {sorted(STYLE_PRESETS)} or any free-text style label")
+                   help=f"Style: one of {sorted(STYLE_PRESETS)} or any free-text style label. "
+                        "Comma-separated for multi-style (e.g. 'lego,south_park,muppet') — "
+                        "produces one candidate per style; --count is ignored.")
     p.add_argument("--slug", required=True,
                    help="Short slug (lowercase, underscores), e.g. young_woman")
     p.add_argument("--count", type=int, default=3, help="Number of candidates (default 3)")
