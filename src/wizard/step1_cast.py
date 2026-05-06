@@ -160,7 +160,7 @@ def _render_cast_tiles(cast: dict):
             )
             if st.button("Remove", key=f"cast_rm_{char.slug}", width="stretch"):
                 remove_character(char.slug)
-                st.toast(f"Removed {char.display_name}", icon="🗑")
+                st.toast(f"Removed {char.display_name}", icon="🗑️")
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -193,6 +193,7 @@ def _enter_edit_mode():
         "custom_style": "",
         "count": 3,
         "candidates": [],     # list of {path, style, idx}
+        "last_failures": [],  # list of {style, error} from last generation attempt
         "picked": None,       # idx int, or None
         "voice_id": "",
         "tempo_label": "Natural",
@@ -307,6 +308,23 @@ def _render_edit():
         st.divider()
         _render_candidates_grid(draft)
 
+    # 4b. Show any generation errors so failures are diagnosable
+    failures = draft.get("last_failures") or []
+    if failures and not draft["candidates"]:
+        st.error(
+            "**All candidates failed.** Common causes:\n"
+            "- `GOOGLE_API_KEY` missing or invalid (check the Settings panel)\n"
+            "- Free-tier Nano Banana Pro rate limit hit (wait ~1 min, retry)\n"
+            "- Description triggered Google's content moderation\n\n"
+            "Detailed errors per style:"
+        )
+        for f in failures:
+            st.code(f"[{f['style']}]  {f['error']}", language=None)
+    elif failures:
+        with st.expander(f"⚠ {len(failures)} candidate(s) failed — see details"):
+            for f in failures:
+                st.code(f"[{f['style']}]  {f['error']}", language=None)
+
     # 5. Voice + tempo + name + save (only after a pick)
     if draft["picked"] is not None:
         st.divider()
@@ -318,7 +336,7 @@ def _generate_candidates_for_draft():
     draft = st.session_state.draft
 
     if not os.environ.get("GOOGLE_API_KEY"):
-        st.toast("GOOGLE_API_KEY not set — open Settings (⚙)", icon="⚠️")
+        st.toast("Add GOOGLE_API_KEY in the Settings panel first", icon="⚠️")
         return
 
     # Generate a session-local slug for the candidates dir
@@ -354,23 +372,28 @@ def _generate_candidates_for_draft():
         results = asyncio.run(run_all())
 
     candidates = []
-    fail_count = 0
+    failures: list[tuple[int, str, Exception]] = []
     for (i, style), r in zip(plan, results):
         if isinstance(r, Exception):
-            fail_count += 1
+            failures.append((i, style, r))
             continue
         candidates.append({"idx": i, "style": style, "path": str(out_dir / f"option_{i}.png")})
 
     draft["candidates"] = candidates
     draft["picked"] = None  # reset selection on re-generate
+    # Stash failures so the UI can render them after the rerun
+    draft["last_failures"] = [
+        {"style": style, "error": f"{type(e).__name__}: {str(e)[:240]}"}
+        for _, style, e in failures
+    ] if failures else []
 
     if not candidates:
-        st.toast("All candidates failed — check GOOGLE_API_KEY", icon="✗")
-    elif fail_count:
-        st.toast(f"{len(candidates)} ok · {fail_count} failed", icon="⚠️")
+        st.toast("All candidates failed — see error below", icon="❌")
+    elif failures:
+        st.toast(f"{len(candidates)} ok · {len(failures)} failed", icon="⚠️")
     else:
         st.toast(f"Generated {len(candidates)} candidate{'s' if len(candidates) != 1 else ''}",
-                 icon="✓")
+                 icon="✅")
 
 
 def _render_candidates_grid(draft):
@@ -524,4 +547,4 @@ def _save_draft_as_character():
     char.save(dir=target_dir)
 
     add_character(char)
-    st.toast(f"Added {char.display_name} to your cast", icon="✓")
+    st.toast(f"Added {char.display_name} to your cast", icon="✅")
