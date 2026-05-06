@@ -55,7 +55,6 @@ class KlingAvatarFalProvider(ExtendedVideoProvider):
             retry_config=retry_config,
             timeout=timeout,
         )
-        os.environ["FAL_KEY"] = api_key
         fal_client.api_key = api_key
 
     def _handle_api_error(self, error: Exception) -> None:

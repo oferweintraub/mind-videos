@@ -55,7 +55,6 @@ class VeedFabricFalProvider(ExtendedVideoProvider):
             timeout=timeout,
         )
         # Configure fal_client with API key (both methods for compatibility)
-        os.environ["FAL_KEY"] = api_key
         fal_client.api_key = api_key
 
     def _get_resolution_params(self) -> dict:

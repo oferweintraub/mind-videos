@@ -89,20 +89,20 @@ def _settings_drawer():
             '</p>',
             unsafe_allow_html=True,
         )
+        # Keys are stored in session_state (per-browser-session), never
+        # written to os.environ — that would leak across users on Streamlit
+        # Cloud's shared-process model.
         for k, label, link in [
             ("FAL_KEY",            "fal.ai (lip-sync)",   "https://fal.ai/dashboard/keys"),
             ("ELEVENLABS_API_KEY", "ElevenLabs (voice)",  "https://elevenlabs.io/app/settings/api-keys"),
             ("GOOGLE_API_KEY",     "Google AI (images)",  "https://aistudio.google.com/app/apikey"),
         ]:
-            v = st.text_input(
+            st.text_input(
                 label,
-                value=st.session_state.get(f"_key_{k}", os.environ.get(k, "")),
                 type="password",
                 key=f"_key_{k}",
                 help=f"Get key: {link}",
             )
-            if v:
-                os.environ[k] = v
 
         st.markdown(
             '<p class="wz-tiny" style="margin-top:0.6rem;">'

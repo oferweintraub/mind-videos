@@ -19,6 +19,7 @@ from src.wizard.state import (
     estimate_episode, safe_episode_slug, export_project_zip,
 )
 from src.wizard.theme import PALETTE, pill
+from src.wizard import creds
 
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -76,12 +77,12 @@ def _render_preflight():
 
     st.markdown('<div style="margin-top:1.5rem;"></div>', unsafe_allow_html=True)
 
-    # Preflight environment checks (warn-only — let user fix from sidebar)
-    import os
-    missing = [k for k in ("FAL_KEY", "ELEVENLABS_API_KEY") if not os.environ.get(k)]
+    # Preflight: keys must be present in this user's session
+    c = creds.read()
+    missing = c.missing("fal", "elevenlabs")
     if missing:
         st.warning(
-            f"Add **{', '.join(missing)}** in the Settings drawer (⚙) before rendering."
+            f"Add **{', '.join(missing)}** key(s) in the Settings panel before rendering."
         )
 
     # Footer nav
@@ -107,50 +108,6 @@ def _render_preflight():
 
 
 # --- Running -----------------------------------------------------------------
-
-async def _run_pipeline(segments, cast, episode_dir: Path, status_state: dict):
-    """Drive the pipeline. status_state holds per-segment progress dicts so the
-    UI can read it after each rerun (we update synchronously between awaits).
-    """
-    audio_dir = episode_dir / "audio"
-    video_dir = episode_dir / "videos"
-    audio_dir.mkdir(parents=True, exist_ok=True)
-    video_dir.mkdir(parents=True, exist_ok=True)
-
-    video_paths = []
-    for i, seg in enumerate(segments):
-        char = cast[seg["character"]]
-        seg_id = f"seg{i:02d}_{char.slug}"
-        audio_path = audio_dir / f"{seg_id}.mp3"
-        video_path = video_dir / f"{seg_id}.mp4"
-
-        # Audio
-        status_state[i] = {"status": "audio", "msg": "generating speech…", "elapsed": 0}
-        await generate_tts(
-            text=seg["text"], voice_id=char.voice.voice_id, output_path=audio_path,
-            stability=char.voice.stability, similarity=char.voice.similarity,
-            style=char.voice.style, tempo=char.voice.tempo,
-        )
-
-        # Lip-sync
-        status_state[i] = {"status": "lipsync", "msg": "starting…", "elapsed": 0}
-
-        def cb(elapsed, msg, _i=i):
-            status_state[_i] = {"status": "lipsync", "msg": msg, "elapsed": elapsed}
-
-        await lipsync(char.image_path, audio_path, video_path, progress_cb=cb)
-
-        status_state[i] = {"status": "done", "msg": "", "elapsed": 0}
-        video_paths.append(video_path)
-
-    # Concat
-    status_state["concat"] = {"status": "running"}
-    final_path = episode_dir / "final.mp4"
-    await concat(video_paths, final_path)
-    status_state["concat"] = {"status": "done"}
-
-    return final_path
-
 
 def _render_running():
     cast = st.session_state.cast
@@ -223,6 +180,11 @@ def _render_running():
             seg_placeholders[i].markdown(pill(f"✗ {msg[:30]}", "error"),
                                          unsafe_allow_html=True)
 
+    # Read this user's keys ONCE before the render starts. They're passed
+    # explicitly into each pipeline call so a concurrent user can't race on
+    # them via os.environ.
+    c = creds.require("fal", "elevenlabs")
+
     # Inline async-await of the pipeline. Streamlit's render is paused
     # during this — but since lipsync() awaits real network I/O most of the
     # time, the runtime keeps the UI tab responsive.
@@ -241,6 +203,7 @@ def _render_running():
                 await generate_tts(
                     text=seg["text"], voice_id=char.voice.voice_id,
                     output_path=audio_path,
+                    elevenlabs_api_key=c.elevenlabs,
                     stability=char.voice.stability, similarity=char.voice.similarity,
                     style=char.voice.style, tempo=char.voice.tempo,
                 )
@@ -248,7 +211,10 @@ def _render_running():
                 render_status(i, "lipsync", elapsed=0)
                 def cb(elapsed, msg, _i=i):
                     render_status(_i, "lipsync", msg=msg, elapsed=elapsed)
-                await lipsync(char.image_path, audio_path, video_path, progress_cb=cb)
+                await lipsync(
+                    char.image_path, audio_path, video_path,
+                    fal_key=c.fal, progress_cb=cb,
+                )
                 render_status(i, "done")
             except Exception as e:
                 render_status(i, "error", msg=f"{type(e).__name__}")

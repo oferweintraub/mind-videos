@@ -27,6 +27,7 @@ from src.wizard.state import (
     add_character, remove_character, load_demo, safe_slug, DEMO_CAST_SLUGS,
 )
 from src.wizard.theme import PALETTE
+from src.wizard import creds
 
 
 CHARACTERS_DIR = ROOT / "characters"
@@ -335,8 +336,9 @@ def _generate_candidates_for_draft():
     """Run Nano Banana Pro and save candidates. Blocking with a spinner."""
     draft = st.session_state.draft
 
-    if not os.environ.get("GOOGLE_API_KEY"):
-        st.toast("Add GOOGLE_API_KEY in the Settings panel first", icon="⚠️")
+    c = creds.read()
+    if not c.google:
+        st.toast("Add Google AI key in the Settings panel first", icon="⚠️")
         return
 
     # Generate a session-local slug for the candidates dir
@@ -360,7 +362,7 @@ def _generate_candidates_for_draft():
     from google import genai
 
     async def run_all():
-        client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+        client = genai.Client(api_key=c.google)
         coros = []
         for i, style in plan:
             prompt = build_prompt(draft["description"], style)

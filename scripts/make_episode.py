@@ -76,10 +76,14 @@ async def run(script_path: Path, episode_dir: Path):
     print(f">> Characters: {script.characters}")
     print(f">> Segments:   {len(script.segments)}")
 
-    # Preflight env vars
-    for k in ("FAL_KEY", "ELEVENLABS_API_KEY"):
-        if not os.environ.get(k):
-            sys.exit(f"ERROR: {k} not set. Add it to .env or export it.")
+    # Preflight env vars (CLI mode — keys from .env are fine here since
+    # there's no multi-tenant concurrency)
+    fal_key = os.environ.get("FAL_KEY") or os.environ.get("FAL_API_KEY")
+    elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY")
+    if not fal_key:
+        sys.exit("ERROR: FAL_KEY not set. Add it to .env or export it.")
+    if not elevenlabs_key:
+        sys.exit("ERROR: ELEVENLABS_API_KEY not set. Add it to .env or export it.")
 
     audio_dir = episode_dir / "audio"
     video_dir = episode_dir / "videos"
@@ -104,6 +108,7 @@ async def run(script_path: Path, episode_dir: Path):
             text=seg.text,
             voice_id=char.voice.voice_id,
             output_path=audio_path,
+            elevenlabs_api_key=elevenlabs_key,
             stability=char.voice.stability,
             similarity=char.voice.similarity,
             style=char.voice.style,
@@ -126,7 +131,10 @@ async def run(script_path: Path, episode_dir: Path):
             if elapsed - _last[0] >= 5.0:
                 print(f"   lipsync: waited {elapsed:5.0f}s — fal.ai status: {msg}")
                 _last[0] = elapsed
-        await lipsync(char.image_path, audio_path, video_path, progress_cb=cb)
+        await lipsync(
+            char.image_path, audio_path, video_path,
+            fal_key=fal_key, progress_cb=cb,
+        )
         print(f"   video:   {video_path.relative_to(ROOT)}  [rendered in {time.time()-t1:.0f}s]")
 
         video_paths.append(video_path)

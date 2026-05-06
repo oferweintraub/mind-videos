@@ -2,10 +2,14 @@
 
 Used by the local Streamlit UI (app.py) and reusable from any script.
 Each function is idempotent: skips if the output file already exists.
+
+API keys are passed as explicit keyword arguments so each call uses its
+own caller-provided credentials. We deliberately do NOT read from
+os.environ here — on multi-tenant deploys (Streamlit Cloud) os.environ is
+process-global and would leak keys between concurrent users.
 """
 
 import asyncio
-import os
 import shutil
 import time
 from pathlib import Path
@@ -16,15 +20,19 @@ import fal_client
 from google import genai
 from google.genai import types
 
-if "FAL_KEY" not in os.environ and "FAL_API_KEY" in os.environ:
-    os.environ["FAL_KEY"] = os.environ["FAL_API_KEY"]
 
-
-async def generate_image(prompt: str, output_path: Path) -> Path:
+async def generate_image(
+    prompt: str,
+    output_path: Path,
+    *,
+    google_api_key: str,
+) -> Path:
     output_path = Path(output_path)
     if output_path.exists():
         return output_path
-    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    if not google_api_key:
+        raise RuntimeError("generate_image requires google_api_key")
+    client = genai.Client(api_key=google_api_key)
     response = client.models.generate_content(
         model="nano-banana-pro-preview",
         contents=[prompt],
@@ -41,6 +49,8 @@ async def generate_tts(
     text: str,
     voice_id: str,
     output_path: Path,
+    *,
+    elevenlabs_api_key: str,
     stability: float = 0.5,
     similarity: float = 0.8,
     style: float = 0.3,
@@ -49,13 +59,15 @@ async def generate_tts(
     output_path = Path(output_path)
     if output_path.exists():
         return output_path
+    if not elevenlabs_api_key:
+        raise RuntimeError("generate_tts requires elevenlabs_api_key")
     raw = output_path.parent / f"{output_path.stem}_raw.mp3"
 
     if not raw.exists():
         async with httpx.AsyncClient(timeout=60.0) as client:
             r = await client.post(
                 f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-                headers={"xi-api-key": os.environ["ELEVENLABS_API_KEY"]},
+                headers={"xi-api-key": elevenlabs_api_key},
                 json={
                     "text": text,
                     "model_id": "eleven_v3",
@@ -94,16 +106,23 @@ async def lipsync(
     image_path: Path,
     audio_path: Path,
     output_path: Path,
+    *,
+    fal_key: str,
     progress_cb: Optional[Callable[[float, str], None]] = None,
 ) -> Path:
     """VEED Fabric 1.0 lip-sync. progress_cb(elapsed_seconds, message) called each ~1s."""
     output_path = Path(output_path)
     if output_path.exists():
         return output_path
+    if not fal_key:
+        raise RuntimeError("lipsync requires fal_key")
 
-    img_url = await fal_client.upload_file_async(str(image_path))
-    aud_url = await fal_client.upload_file_async(str(audio_path))
-    handler = await fal_client.submit_async(
+    # Per-call client so each user's key stays scoped to their session.
+    client = fal_client.AsyncClient(key=fal_key)
+
+    img_url = await client.upload_file(str(image_path))
+    aud_url = await client.upload_file(str(audio_path))
+    handler = await client.submit(
         "veed/fabric-1.0",
         arguments={
             "image_url": img_url,
@@ -136,8 +155,8 @@ async def lipsync(
         await asyncio.sleep(1)
 
     result = await handler.get()
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.get(result["video"]["url"])
+    async with httpx.AsyncClient(timeout=120.0) as http_client:
+        resp = await http_client.get(result["video"]["url"])
         resp.raise_for_status()
         output_path.write_bytes(resp.content)
     return output_path
