@@ -209,6 +209,10 @@ def _enter_edit_mode():
         "tempo_label": "Natural",
         "display_name": "",
         "slug": "",
+        # Optional reference image — when provided, generation routes through
+        # FLUX Kontext Pro (fal.ai) instead of Nano Banana Pro
+        "ref_image_bytes": None,
+        "ref_image_name": "",
     }
 
 
@@ -264,6 +268,44 @@ def _render_edit():
         label_visibility="collapsed",
         key="draft_desc",
     )
+
+    # 1b. Optional reference image
+    st.markdown("### Reference image (optional)")
+    st.markdown(
+        '<p class="wz-quiet" style="font-size:0.88rem;">'
+        'Upload a photo of a real person or another character to lock in the face. '
+        'When provided, generation routes through <strong>FLUX Kontext Pro</strong> '
+        '(fal.ai) — better at preserving identity than text-only prompts. '
+        'Skip this for fully imagined characters.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+    ref_upload = st.file_uploader(
+        "Reference image",
+        type=["png", "jpg", "jpeg", "webp"],
+        label_visibility="collapsed",
+        key="draft_ref_upload",
+    )
+    if ref_upload is not None:
+        draft["ref_image_bytes"] = ref_upload.getvalue()
+        draft["ref_image_name"] = ref_upload.name
+
+    if draft["ref_image_bytes"]:
+        c1, c2 = st.columns([1, 5])
+        with c1:
+            st.image(draft["ref_image_bytes"], width=120)
+        with c2:
+            st.markdown(
+                f'<p class="wz-quiet" style="margin-top:0.6rem;">'
+                f'Reference: <strong>{draft["ref_image_name"]}</strong> · '
+                f'using FLUX Kontext Pro (~$0.05 per candidate)'
+                f'</p>',
+                unsafe_allow_html=True,
+            )
+            if st.button("Remove reference", key="draft_ref_remove"):
+                draft["ref_image_bytes"] = None
+                draft["ref_image_name"] = ""
+                st.rerun()
 
     # 2. Style — one or compare
     st.markdown("### Style")
@@ -370,11 +412,18 @@ def _render_edit():
 
 
 def _generate_candidates_for_draft():
-    """Run Nano Banana Pro and save candidates. Blocking with a spinner."""
+    """Run image generation for the draft. Routes between Nano Banana Pro
+    (text-only) and FLUX Kontext Pro (when a reference image is attached)."""
     draft = st.session_state.draft
 
     c = creds.read()
-    if not c.google:
+    use_ref = bool(draft.get("ref_image_bytes"))
+
+    # Key requirements differ per route
+    if use_ref and not c.fal:
+        st.toast("Add fal.ai key in the Settings panel — needed for FLUX Kontext (ref image)", icon="⚠️")
+        return
+    if not use_ref and not c.google:
         st.toast("Add Google AI key in the Settings panel first", icon="⚠️")
         return
 
@@ -388,26 +437,41 @@ def _generate_candidates_for_draft():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # If ref bytes are attached, save them to the candidates dir so FLUX Kontext
+    # has a stable file path to upload.
+    ref_path: Optional[Path] = None
+    if use_ref:
+        ref_path = out_dir / "_ref.png"
+        ref_path.write_bytes(draft["ref_image_bytes"])
+
     # Build the (idx, style) plan
     if draft["compare_styles"]:
         plan = list(enumerate(draft["compare_pick"], start=1))
     else:
         plan = [(i, draft["single_style"]) for i in range(1, draft["count"] + 1)]
 
-    # Lazy-import the prompt builder + generator from the existing CLI module
-    from scripts.character_lab import build_prompt, generate_one
-    from google import genai
+    from src.pipeline.character_gen import generate_text_only, generate_with_ref
+    from scripts.character_lab import build_prompt
 
     async def run_all():
-        client = genai.Client(api_key=c.google)
         coros = []
         for i, style in plan:
-            prompt = build_prompt(draft["description"], style)
             (out_dir / f"option_{i}_style.txt").write_text(style)
-            coros.append(generate_one(client, prompt, out_dir / f"option_{i}.png"))
+            out_path = out_dir / f"option_{i}.png"
+            if use_ref:
+                coros.append(generate_with_ref(
+                    ref_path, draft["description"], style, out_path,
+                    fal_key=c.fal,
+                ))
+            else:
+                coros.append(generate_text_only(
+                    draft["description"], style, out_path,
+                    google_api_key=c.google,
+                ))
         return await asyncio.gather(*coros, return_exceptions=True)
 
-    with st.spinner(f"Generating {len(plan)} candidate{'s' if len(plan) != 1 else ''}…"):
+    label_route = "FLUX Kontext (ref)" if use_ref else "Nano Banana Pro"
+    with st.spinner(f"Generating {len(plan)} candidate{'s' if len(plan) != 1 else ''} via {label_route}…"):
         results = asyncio.run(run_all())
 
     candidates = []
