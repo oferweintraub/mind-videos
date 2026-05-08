@@ -66,8 +66,11 @@ def render():
     if "step1_mode" not in st.session_state:
         st.session_state.step1_mode = "list"
 
-    if st.session_state.step1_mode == "edit":
+    mode = st.session_state.step1_mode
+    if mode == "edit":
         _render_edit()
+    elif mode == "edit_existing":
+        _render_edit_existing()
     else:
         _render_list()
 
@@ -159,10 +162,16 @@ def _render_cast_tiles(cast: dict):
                 f'</div>',
                 unsafe_allow_html=True,
             )
-            if st.button("Remove", key=f"cast_rm_{char.slug}", width="stretch"):
-                remove_character(char.slug)
-                st.toast(f"Removed {char.display_name}", icon="🗑️")
-                st.rerun()
+            edit_col, rm_col = st.columns(2)
+            with edit_col:
+                if st.button("Edit", key=f"cast_edit_{char.slug}", width="stretch"):
+                    _enter_edit_existing(char.slug)
+                    st.rerun()
+            with rm_col:
+                if st.button("Remove", key=f"cast_rm_{char.slug}", width="stretch"):
+                    remove_character(char.slug)
+                    st.toast(f"Removed {char.display_name}", icon="🗑️")
+                    st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
     # The "+ add" tile, if there's room
@@ -207,6 +216,34 @@ def _exit_edit_mode():
     st.session_state.step1_mode = "list"
     if "draft" in st.session_state:
         del st.session_state.draft
+    if "edit_existing" in st.session_state:
+        del st.session_state.edit_existing
+
+
+def _enter_edit_existing(slug: str):
+    """Open the edit-existing-character form for the given slug."""
+    char = st.session_state.cast.get(slug)
+    if char is None:
+        return
+    # Inverse-lookup tempo label
+    tempo_label = next(
+        (label for label, val in TEMPO_PRESETS.items() if val == char.voice.tempo),
+        "Natural",
+    )
+    st.session_state.step1_mode = "edit_existing"
+    st.session_state.edit_existing = {
+        "slug": slug,
+        "display_name": char.display_name,
+        "description": char.description,
+        "style": char.style,
+        "voice_id": char.voice.voice_id,
+        "tempo_label": tempo_label,
+        # Regen sub-state — populated when user clicks "Regenerate images"
+        "regen_active": False,
+        "regen_candidates": [],     # [{idx, style, path}]
+        "regen_failures": [],       # [{style, error}]
+        "regen_picked": None,       # idx of chosen candidate, or None
+    }
 
 
 def _render_edit():
@@ -550,3 +587,274 @@ def _save_draft_as_character():
 
     add_character(char)
     st.toast(f"Added {char.display_name} to your cast", icon="✅")
+
+
+# --- Edit-existing view -------------------------------------------------------
+
+def _render_edit_existing():
+    """Edit metadata of an existing character; optionally regenerate the image."""
+    edit = st.session_state.edit_existing
+    slug = edit["slug"]
+    char = st.session_state.cast.get(slug)
+    if char is None:
+        st.warning("Character no longer exists.")
+        if st.button("← Back to cast"):
+            _exit_edit_mode()
+            st.rerun()
+        return
+
+    if st.button("← Back to cast", key="edit_existing_back"):
+        _exit_edit_mode()
+        st.rerun()
+
+    st.markdown(f"# Edit *{char.display_name}*")
+    st.markdown(
+        '<p class="wz-quiet">Change voice, tempo, or display name. '
+        'Regenerate the image with new candidates if you want a different look.</p>',
+        unsafe_allow_html=True,
+    )
+
+    # Two columns: image + regen control on left; metadata fields on right
+    img_col, form_col = st.columns([1, 1.6], gap="large")
+
+    with img_col:
+        # Show current image OR the picked regen candidate
+        if edit["regen_picked"] is not None:
+            picked_path = next(
+                c["path"] for c in edit["regen_candidates"] if c["idx"] == edit["regen_picked"]
+            )
+            st.image(picked_path, width="stretch")
+            st.markdown(
+                f'<p class="wz-tiny" style="text-align:center;">'
+                f'<strong style="color:{PALETTE["accent"]};">New image</strong> '
+                f'(saves on Apply)</p>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.image(str(char.image_path), width="stretch")
+            st.markdown(
+                '<p class="wz-tiny" style="text-align:center;">Current image</p>',
+                unsafe_allow_html=True,
+            )
+
+        if not edit["regen_active"]:
+            if st.button("🎨 Regenerate images", key="regen_start", width="stretch"):
+                edit["regen_active"] = True
+                st.rerun()
+        else:
+            if st.button("Cancel regenerate", key="regen_cancel", width="stretch"):
+                edit["regen_active"] = False
+                edit["regen_candidates"] = []
+                edit["regen_picked"] = None
+                edit["regen_failures"] = []
+                st.rerun()
+
+    with form_col:
+        # Description (read-only, shown as context)
+        if edit["description"]:
+            st.markdown("##### Description")
+            st.markdown(
+                f'<p class="wz-quiet" style="font-size:0.9rem;">{edit["description"]}</p>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("&nbsp;", unsafe_allow_html=True)
+
+        # Display name
+        edit["display_name"] = st.text_input(
+            "Display name",
+            value=edit["display_name"],
+            key="ee_display_name",
+        )
+
+        # Voice picker
+        st.markdown("##### Voice")
+        catalog = _voice_catalog()
+        voice_ids = [v["id"] for v in catalog]
+        # If the character's voice isn't in the catalog (custom/cloned), insert it.
+        if edit["voice_id"] and edit["voice_id"] not in voice_ids:
+            voice_ids.insert(0, edit["voice_id"])
+
+        try:
+            voice_idx = voice_ids.index(edit["voice_id"])
+        except ValueError:
+            voice_idx = 0
+        voice_lookup = {v["id"]: v for v in catalog}
+
+        def _fmt(vid):
+            v = voice_lookup.get(vid)
+            return _voice_label(v) if v else f"{vid} (custom)"
+
+        new_voice = st.selectbox(
+            "Select voice",
+            options=voice_ids,
+            index=voice_idx,
+            format_func=_fmt,
+            label_visibility="collapsed",
+            key="ee_voice",
+        )
+        edit["voice_id"] = new_voice
+        preview = _preview_path(new_voice)
+        if preview:
+            st.audio(str(preview), format="audio/mp3")
+
+        # Tempo
+        st.markdown("##### Tempo")
+        edit["tempo_label"] = st.segmented_control(
+            " ",
+            options=list(TEMPO_PRESETS.keys()),
+            default=edit["tempo_label"],
+            label_visibility="collapsed",
+            key="ee_tempo",
+        ) or "Natural"
+
+    # Regenerate flow (full-width below the two-col layout)
+    if edit["regen_active"]:
+        st.divider()
+        _render_regen_section(edit)
+
+    st.divider()
+
+    # Save / Cancel
+    cols = st.columns([1, 1, 2])
+    with cols[0]:
+        if st.button("Cancel", key="ee_cancel", width="stretch"):
+            _exit_edit_mode()
+            st.rerun()
+    with cols[2]:
+        save_label = "Apply changes"
+        if edit["regen_picked"] is not None:
+            save_label = "Apply (with new image)"
+        if st.button(save_label, type="primary", width="stretch", key="ee_save"):
+            _apply_edit_existing()
+            _exit_edit_mode()
+            st.rerun()
+
+
+def _render_regen_section(edit: dict):
+    """Run another generation pass and let the user pick a new image."""
+    st.markdown("### Regenerate the image")
+    st.markdown(
+        '<p class="wz-quiet">Same description and style — fresh candidates. '
+        'Pick one to replace the current image (only saves when you click Apply).</p>',
+        unsafe_allow_html=True,
+    )
+
+    cols = st.columns([1, 1, 2])
+    with cols[0]:
+        count = st.slider("Variants", 1, 4, 3, key="regen_count")
+    with cols[1]:
+        if st.button("▶ Generate", type="primary", key="regen_go", width="stretch"):
+            _run_regen(edit, count=count)
+            st.rerun()
+
+    if edit["regen_candidates"]:
+        st.markdown("#### Pick one to replace the current image")
+        grid = st.columns(len(edit["regen_candidates"]))
+        for col, cand in zip(grid, edit["regen_candidates"]):
+            with col:
+                picked = (edit["regen_picked"] == cand["idx"])
+                klass = "selected" if picked else ""
+                st.markdown(f'<div class="wz-card {klass}" style="padding:0.5rem;">',
+                            unsafe_allow_html=True)
+                st.image(cand["path"], width="stretch")
+                st.markdown(
+                    f'<p class="wz-tiny" style="text-align:center; margin:0.4rem 0 0.2rem 0;">'
+                    f'{cand["style"]}</p>',
+                    unsafe_allow_html=True,
+                )
+                if st.button("✓ Selected" if picked else "Select",
+                             key=f"regen_pick_{cand['idx']}",
+                             width="stretch",
+                             type="primary" if picked else "secondary"):
+                    edit["regen_picked"] = cand["idx"]
+                    st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+
+    if edit["regen_failures"] and not edit["regen_candidates"]:
+        st.error(
+            "**All candidates failed.** Check your Google AI key in the Settings panel "
+            "and look for rate-limit / safety-filter messages below."
+        )
+        for f in edit["regen_failures"]:
+            st.code(f"[{f['style']}]  {f['error']}", language=None)
+
+
+def _run_regen(edit: dict, count: int):
+    """Generate `count` candidates with the existing description + style."""
+    c = creds.read()
+    if not c.google:
+        st.toast("Add Google AI key in the Settings panel first", icon="⚠️")
+        return
+
+    out_dir = CANDIDATES_DIR / f"regen_{edit['slug']}"
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    style = edit["style"] or "south_park"
+    plan = [(i, style) for i in range(1, count + 1)]
+
+    from scripts.character_lab import build_prompt, generate_one
+    from google import genai
+
+    async def run_all():
+        client = genai.Client(api_key=c.google)
+        coros = []
+        for i, sty in plan:
+            prompt = build_prompt(edit["description"] or edit["display_name"], sty)
+            coros.append(generate_one(client, prompt, out_dir / f"option_{i}.png"))
+        return await asyncio.gather(*coros, return_exceptions=True)
+
+    with st.spinner(f"Generating {count} candidate{'s' if count != 1 else ''}…"):
+        results = asyncio.run(run_all())
+
+    candidates = []
+    failures = []
+    for (i, sty), r in zip(plan, results):
+        if isinstance(r, Exception):
+            failures.append({"style": sty, "error": f"{type(r).__name__}: {str(r)[:240]}"})
+            continue
+        candidates.append({"idx": i, "style": sty, "path": str(out_dir / f"option_{i}.png")})
+
+    edit["regen_candidates"] = candidates
+    edit["regen_failures"] = failures
+    edit["regen_picked"] = None
+    if not candidates:
+        st.toast("All candidates failed — see error below", icon="❌")
+    else:
+        st.toast(f"Generated {len(candidates)} candidate{'s' if len(candidates) != 1 else ''}",
+                 icon="✅")
+
+
+def _apply_edit_existing():
+    """Persist the edit_existing state to disk + session cast."""
+    edit = st.session_state.edit_existing
+    slug = edit["slug"]
+    char = st.session_state.cast.get(slug)
+    if char is None:
+        return
+
+    # Update mutable metadata
+    char.display_name = (edit["display_name"] or "").strip() or char.display_name
+    char.voice.voice_id = edit["voice_id"]
+    char.voice.tempo = TEMPO_PRESETS[edit["tempo_label"]]
+    # Refresh voice_name from the catalog if possible
+    voice_meta = next((v for v in _voice_catalog() if v["id"] == edit["voice_id"]), None)
+    if voice_meta:
+        char.voice.voice_name = voice_meta["name"]
+
+    # If the user picked a regen candidate, copy it onto the character image
+    if edit["regen_picked"] is not None:
+        src_path = Path(next(
+            c["path"] for c in edit["regen_candidates"] if c["idx"] == edit["regen_picked"]
+        ))
+        if char.dir is not None:
+            shutil.copy2(src_path, char.dir / char.image)
+
+    # Save manifest
+    char.save()
+
+    # Refresh in-memory cast (the dataclass is mutated in place; just re-store)
+    st.session_state.cast[slug] = char
+
+    st.toast(f"Updated {char.display_name}", icon="✅")
