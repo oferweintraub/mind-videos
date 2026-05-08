@@ -28,6 +28,7 @@ from src.wizard.state import (
 )
 from src.wizard.theme import PALETTE
 from src.wizard import creds
+from src.wizard.errors import friendly_error
 
 
 CHARACTERS_DIR = ROOT / "characters"
@@ -388,18 +389,24 @@ def _render_edit():
         st.divider()
         _render_candidates_grid(draft)
 
-    # 4b. Show any generation errors so failures are diagnosable
+    # 4b. Show any generation errors so failures are diagnosable.
+    # Use the friendly-error helper to translate the FIRST failure's exception
+    # into actionable prose; show the per-style raw errors below for context.
     failures = draft.get("last_failures") or []
     if failures and not draft["candidates"]:
-        st.error(
-            "**All candidates failed.** Common causes:\n"
-            "- `GOOGLE_API_KEY` missing or invalid (check the Settings panel)\n"
-            "- Free-tier Nano Banana Pro rate limit hit (wait ~1 min, retry)\n"
-            "- Description triggered Google's content moderation\n\n"
-            "Detailed errors per style:"
-        )
-        for f in failures:
-            st.code(f"[{f['style']}]  {f['error']}", language=None)
+        # Reconstruct an Exception-shaped object from the first failure to
+        # feed friendly_error. We stored the message string, not the exception
+        # object; build a synthetic one whose str() matches.
+        first = failures[0]
+        synthetic = type(
+            first["error"].split(":", 1)[0],
+            (Exception,),
+            {},
+        )(": ".join(first["error"].split(": ", 1)[1:]) or first["error"])
+        st.error(f"**All candidates failed.** {friendly_error(synthetic)}")
+        with st.expander("Per-style raw errors"):
+            for f in failures:
+                st.code(f"[{f['style']}]  {f['error']}", language=None)
     elif failures:
         with st.expander(f"⚠ {len(failures)} candidate(s) failed — see details"):
             for f in failures:
@@ -835,12 +842,16 @@ def _render_regen_section(edit: dict):
                 st.markdown('</div>', unsafe_allow_html=True)
 
     if edit["regen_failures"] and not edit["regen_candidates"]:
-        st.error(
-            "**All candidates failed.** Check your Google AI key in the Settings panel "
-            "and look for rate-limit / safety-filter messages below."
-        )
-        for f in edit["regen_failures"]:
-            st.code(f"[{f['style']}]  {f['error']}", language=None)
+        first = edit["regen_failures"][0]
+        synthetic = type(
+            first["error"].split(":", 1)[0],
+            (Exception,),
+            {},
+        )(": ".join(first["error"].split(": ", 1)[1:]) or first["error"])
+        st.error(f"**All candidates failed.** {friendly_error(synthetic)}")
+        with st.expander("Per-style raw errors"):
+            for f in edit["regen_failures"]:
+                st.code(f"[{f['style']}]  {f['error']}", language=None)
 
 
 def _run_regen(edit: dict, count: int):
