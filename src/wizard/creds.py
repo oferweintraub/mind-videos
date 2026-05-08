@@ -38,12 +38,19 @@ class Credentials:
 
 
 def read() -> Credentials:
-    """Read keys for the current browser session (with env fallback for CLI)."""
+    """Read keys for the current browser session (with env fallback for CLI).
+
+    Strips whitespace defensively — copy-paste from emails / password
+    managers / docs frequently grabs trailing newlines or spaces, and the
+    API providers reject those as 401 Unauthorized.
+    """
     s = st.session_state
+    def _clean(v: str) -> str:
+        return (v or "").strip()
     return Credentials(
-        fal=s.get(_FAL_SS) or os.environ.get("FAL_KEY") or os.environ.get("FAL_API_KEY") or "",
-        elevenlabs=s.get(_ELEVENLABS_SS) or os.environ.get("ELEVENLABS_API_KEY") or "",
-        google=s.get(_GOOGLE_SS) or os.environ.get("GOOGLE_API_KEY") or "",
+        fal=_clean(s.get(_FAL_SS)) or _clean(os.environ.get("FAL_KEY")) or _clean(os.environ.get("FAL_API_KEY")),
+        elevenlabs=_clean(s.get(_ELEVENLABS_SS)) or _clean(os.environ.get("ELEVENLABS_API_KEY")),
+        google=_clean(s.get(_GOOGLE_SS)) or _clean(os.environ.get("GOOGLE_API_KEY")),
     )
 
 

@@ -244,11 +244,7 @@ def _render_running():
         st.session_state.render_phase = "done"
         st.rerun()
     except Exception as e:
-        st.error(
-            f"**Render failed** at: `{type(e).__name__}: {e}`\n\n"
-            "The pipeline is idempotent — anything successfully generated is cached. "
-            "Click **Try again** to resume from where it stopped."
-        )
+        st.error(_friendly_error(e))
         nav = st.columns([1, 1, 1])
         with nav[0]:
             if st.button("← Edit script"):
@@ -259,6 +255,57 @@ def _render_running():
             if st.button("↻ Try again", type="primary"):
                 st.session_state.render_phase = "preflight"
                 st.rerun()
+
+
+def _friendly_error(e: Exception) -> str:
+    """Translate common pipeline errors into actionable hints."""
+    msg = str(e)
+    typename = type(e).__name__
+
+    # ElevenLabs 401 — bad/missing/whitespace-y key
+    if "elevenlabs.io" in msg and "401" in msg:
+        return (
+            "**Render failed: ElevenLabs rejected the API key (401 Unauthorized).**\n\n"
+            "Common causes:\n"
+            "1. The key in the **Settings panel** is wrong, expired, or has trailing whitespace\n"
+            "2. The key was revoked at https://elevenlabs.io/app/settings/api-keys\n\n"
+            "Fix: open the Settings panel (left), click the eye icon to reveal the "
+            "ElevenLabs key, paste it fresh from your account page, then click **Try again**.\n\n"
+            f"<details><summary>Technical details</summary>\n\n`{typename}: {msg[:300]}`</details>"
+        )
+    # ElevenLabs 403 — tier issue (Free/Starter can't use eleven_v3)
+    if "elevenlabs.io" in msg and "403" in msg:
+        return (
+            "**Render failed: ElevenLabs returned 403 Forbidden.**\n\n"
+            "Most likely: your account is on the **Free or Starter** tier. The Hebrew "
+            "model (`eleven_v3`) requires the **Creator plan** ($22/mo) or higher. "
+            "Upgrade at https://elevenlabs.io/app/subscription, then click **Try again**.\n\n"
+            f"<details><summary>Technical details</summary>\n\n`{typename}: {msg[:300]}`</details>"
+        )
+    # fal.ai 401/403 — usually balance / key
+    if "fal" in msg.lower() and ("401" in msg or "403" in msg):
+        return (
+            "**Render failed: fal.ai rejected the request.**\n\n"
+            "Common causes:\n"
+            "1. **Out of paid balance** — top up at https://fal.ai/dashboard/billing\n"
+            "2. The key in the **Settings panel** is wrong or has trailing whitespace\n\n"
+            "Fix one of those, then click **Try again**.\n\n"
+            f"<details><summary>Technical details</summary>\n\n`{typename}: {msg[:300]}`</details>"
+        )
+    # ffmpeg failures (rare, but possible if Streamlit Cloud has stale binaries)
+    if "ffmpeg" in msg.lower():
+        return (
+            "**Render failed: ffmpeg returned an error.**\n\n"
+            "This is usually transient. Click **Try again** — the pipeline is idempotent "
+            "and resumes from cached steps.\n\n"
+            f"<details><summary>Technical details</summary>\n\n`{typename}: {msg[:400]}`</details>"
+        )
+    # Generic fallback
+    return (
+        f"**Render failed** at: `{typename}: {msg[:300]}`\n\n"
+        "The pipeline is idempotent — anything successfully generated is cached. "
+        "Click **Try again** to resume from where it stopped."
+    )
 
 
 # --- Done -------------------------------------------------------------------
