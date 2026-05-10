@@ -25,10 +25,11 @@ import streamlit as st
 
 from src.character import Character, Voice, list_all as list_characters, load as load_character
 from src.script_format import parse
+from src.wizard import persistence
 
 
 WIZARD_KEYS = ("step", "cast", "segments", "title", "result", "render_running",
-               "demo_loaded", "loaded_zip_marker")
+               "demo_loaded", "loaded_zip_marker", "project_id", "share_keys")
 
 
 DEMO_CAST_SLUGS = ["anchor_female", "anchor_male", "eden"]
@@ -67,6 +68,12 @@ def init_state():
         s.demo_loaded = False
     if "loaded_zip_marker" not in s:
         s.loaded_zip_marker = None
+    # Cloud persistence (Phase 2). project_id is set the first time a user
+    # touches state — after that, every state change auto-saves.
+    if "project_id" not in s:
+        s.project_id = None
+    if "share_keys" not in s:
+        s.share_keys = False
 
 
 def load_demo() -> bool:
@@ -84,6 +91,11 @@ def load_demo() -> bool:
     s.segments = [dict(seg) for seg in DEMO_SEGMENTS]  # copy
     s.title = DEMO_TITLE
     s.demo_loaded = True
+    # Persist + push character images to storage
+    pid = ensure_project_id()
+    if pid:
+        persistence.sync_cast_images_to_storage(pid, s.cast)
+    auto_save()
     return len(s.cast) == len(DEMO_CAST_SLUGS)
 
 
@@ -97,6 +109,89 @@ def reset_all():
 
 def go_to(step: int):
     st.session_state.step = step
+    auto_save()
+
+
+# --- Cloud persistence (Phase 2) ---------------------------------------------
+
+def ensure_project_id() -> Optional[str]:
+    """Return the current project_id, creating one (in Supabase) if missing.
+
+    Returns None when Supabase isn't configured — callers should treat
+    persistence as a no-op in that case (local-only mode).
+    """
+    s = st.session_state
+    if s.get("project_id"):
+        return s.project_id
+    if not persistence.is_configured():
+        return None
+    pid = persistence.new_project_id()
+    try:
+        persistence.create_project(pid, title=s.get("title", ""))
+        s.project_id = pid
+        # Reflect in URL so the user can bookmark / share immediately
+        try:
+            st.query_params["p"] = pid
+        except Exception:
+            pass
+        return pid
+    except Exception as e:
+        st.toast(f"Couldn't create cloud project: {type(e).__name__}", icon="⚠️")
+        return None
+
+
+def auto_save() -> None:
+    """Persist session_state to Supabase. Best-effort, idempotent, no-op if
+    persistence isn't configured."""
+    s = st.session_state
+    pid = s.get("project_id")
+    if not pid or not persistence.is_configured():
+        return
+    try:
+        persistence.save_state(
+            pid,
+            title=s.get("title", "") or "",
+            cast_data=persistence.serialize_cast(s.get("cast", {})),
+            segments_data=list(s.get("segments", [])),
+            step=int(s.get("step", 1)),
+            share_keys=bool(s.get("share_keys", False)),
+        )
+    except Exception as e:
+        st.toast(f"Auto-save failed: {type(e).__name__}", icon="⚠️")
+
+
+def hydrate_from_project(project_id: str) -> bool:
+    """Replace current session_state with state from a Supabase project.
+
+    Returns True on success. False if the project doesn't exist or
+    persistence isn't configured.
+    """
+    if not persistence.is_configured():
+        return False
+    row = persistence.load_project(project_id)
+    if row is None:
+        return False
+    s = st.session_state
+    s.project_id = project_id
+    s.title = row.get("title") or ""
+    s.cast = persistence.deserialize_cast(row.get("cast_data") or [])
+    s.segments = list(row.get("segments_data") or [])
+    s.step = int(row.get("step") or 1)
+    s.result = row.get("result")
+    s.share_keys = bool(row.get("share_keys"))
+    # If keys were shared, populate the per-session key inputs
+    api_keys = row.get("api_keys") or {}
+    if api_keys:
+        if api_keys.get("fal"):
+            s["_key_FAL_KEY"] = api_keys["fal"]
+        if api_keys.get("elevenlabs"):
+            s["_key_ELEVENLABS_API_KEY"] = api_keys["elevenlabs"]
+        if api_keys.get("google"):
+            s["_key_GOOGLE_API_KEY"] = api_keys["google"]
+    # Pull character images from storage onto local disk so existing
+    # pipeline code (char.image_path) just works
+    persistence.hydrate_cast_images_from_storage(project_id, s.cast)
+    return True
 
 
 def add_character(char: Character):
@@ -106,6 +201,15 @@ def add_character(char: Character):
     (via scripts/save_character.py or its in-process equivalent).
     """
     st.session_state.cast[char.slug] = char
+    pid = ensure_project_id()
+    if pid and char.dir is not None:
+        img_path = char.dir / char.image
+        if img_path.exists():
+            try:
+                persistence.upload_character_image(pid, char.slug, img_path.read_bytes())
+            except Exception:
+                pass
+    auto_save()
 
 
 def remove_character(slug: str):
@@ -114,15 +218,18 @@ def remove_character(slug: str):
     st.session_state.segments = [
         s for s in st.session_state.segments if s.get("character") != slug
     ]
+    auto_save()
 
 
 def add_segment(character: str, text: str = ""):
     st.session_state.segments.append({"character": character, "text": text})
+    auto_save()
 
 
 def remove_segment(idx: int):
     if 0 <= idx < len(st.session_state.segments):
         st.session_state.segments.pop(idx)
+        auto_save()
 
 
 def move_segment(idx: int, delta: int):
@@ -131,6 +238,7 @@ def move_segment(idx: int, delta: int):
     j = idx + delta
     if 0 <= j < len(segs):
         segs[idx], segs[j] = segs[j], segs[idx]
+        auto_save()
 
 
 # --- Cost / duration estimates ------------------------------------------------

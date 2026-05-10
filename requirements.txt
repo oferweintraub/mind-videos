@@ -26,6 +26,9 @@ rich>=13.0.0
 # Local UI
 streamlit>=1.36.0    # need st.pills, st.segmented_control, st.dialog
 
+# State persistence (Phase 2: shareable project URLs)
+supabase>=2.7.0
+
 # Draft document import (for /new-script --from)
 python-docx>=1.1.0
 pypdf>=4.0.0

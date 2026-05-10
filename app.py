@@ -21,8 +21,10 @@ load_dotenv(ROOT / ".env")
 from src.wizard.theme import apply_theme, step_indicator, PALETTE
 from src.wizard.state import (
     init_state, reset_all, import_project_zip, export_project_zip,
+    hydrate_from_project,
 )
 from src.wizard import step1_cast, step2_script, step3_render
+from src.wizard import persistence
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +180,33 @@ def _settings_drawer():
 
 _gate()
 init_state()
+
+
+# Cloud project hydration: if URL has ?p=<id>, load that project's state.
+# Idempotent — only runs once per session, even on reruns.
+def _hydrate_from_url():
+    if st.session_state.get("_hydrated_from_url"):
+        return
+    pid = (st.query_params.get("p") or "").strip() if hasattr(st, "query_params") else ""
+    if not pid:
+        st.session_state._hydrated_from_url = True
+        return
+    if not persistence.is_configured():
+        st.session_state._hydrated_from_url = True
+        return
+    if hydrate_from_project(pid):
+        st.session_state._hydrated_from_url = True
+    else:
+        # Project doesn't exist — clear the URL param so we don't get stuck
+        try:
+            del st.query_params["p"]
+        except Exception:
+            pass
+        st.session_state._hydrated_from_url = True
+        st.toast(f"Project `{pid}` not found", icon="⚠️")
+
+
+_hydrate_from_url()
 _settings_drawer()
 
 # Header
