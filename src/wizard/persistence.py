@@ -113,8 +113,14 @@ def save_state(
     result: Optional[dict] = None,
     share_keys: Optional[bool] = None,
     api_keys: Optional[dict] = None,
-) -> None:
-    """Update fields on a project row. None values are skipped."""
+) -> int:
+    """Update fields on a project row. None values are skipped.
+
+    Returns the number of rows actually updated. Returns 0 when the WHERE
+    clause matches no row — typically because the row was never created or
+    was deleted, OR because Supabase silently blocked the UPDATE (RLS / key
+    permissions).
+    """
     update: dict = {}
     if title is not None: update["title"] = title
     if cast_data is not None: update["cast_data"] = cast_data
@@ -124,8 +130,65 @@ def save_state(
     if share_keys is not None: update["share_keys"] = share_keys
     if api_keys is not None: update["api_keys"] = api_keys
     if not update:
-        return
-    _client().table("projects").update(update).eq("id", project_id).execute()
+        return 0
+    try:
+        res = (
+            _client().table("projects")
+            .update(update)
+            .eq("id", project_id)
+            .execute()
+        )
+    except Exception:
+        log.exception("save_state(pid=%s) UPDATE raised; keys=%s",
+                      project_id, sorted(update.keys()))
+        raise
+    n = len(res.data) if isinstance(res.data, list) else 0
+    log.info("save_state(pid=%s) UPDATE keys=%s rows=%d",
+             project_id, sorted(update.keys()), n)
+    if n == 0:
+        log.warning(
+            "save_state(pid=%s) 0 rows updated — pid missing from DB or "
+            "anon role lacks UPDATE permission (check RLS / API key scopes)",
+            project_id,
+        )
+    return n
+
+
+def upsert_state(
+    project_id: str,
+    *,
+    title: Optional[str] = None,
+    cast_data: Optional[list] = None,
+    segments_data: Optional[list] = None,
+    step: Optional[int] = None,
+    result: Optional[dict] = None,
+    share_keys: Optional[bool] = None,
+    api_keys: Optional[dict] = None,
+) -> int:
+    """INSERT-or-UPDATE the row. Used as fallback when save_state matches
+    zero rows. Returns rows affected.
+    """
+    row: dict = {"id": project_id}
+    if title is not None: row["title"] = title
+    if cast_data is not None: row["cast_data"] = cast_data
+    if segments_data is not None: row["segments_data"] = segments_data
+    if step is not None: row["step"] = step
+    if result is not None: row["result"] = result
+    if share_keys is not None: row["share_keys"] = share_keys
+    if api_keys is not None: row["api_keys"] = api_keys
+    try:
+        res = (
+            _client().table("projects")
+            .upsert(row, on_conflict="id")
+            .execute()
+        )
+    except Exception:
+        log.exception("upsert_state(pid=%s) raised", project_id)
+        raise
+    n = len(res.data) if isinstance(res.data, list) else 0
+    log.info("upsert_state(pid=%s) rows=%d keys=%s",
+             project_id, n, sorted(row.keys()))
+    return n
 
 
 def delete_project(project_id: str) -> None:

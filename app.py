@@ -343,6 +343,68 @@ def _settings_drawer():
 # Main
 # ---------------------------------------------------------------------------
 
+# Debug endpoint — manually verify Supabase wiring + UPDATE permissions.
+# Visit ?debug=verify to inspect a project row and probe whether UPDATE works.
+def _debug_persistence():
+    st.markdown("# Persistence diagnostic")
+    pid = (st.query_params.get("p") or "").strip()
+    st.write(f"**pid**: `{pid or '(none — add ?p=<id>)'}`")
+    st.write(f"**persistence.is_configured()**: `{persistence.is_configured()}`")
+
+    if not pid:
+        st.info("Append `&p=<project-id>` to inspect a specific row.")
+        return
+
+    st.divider()
+    st.markdown("### Current row")
+    try:
+        row = persistence.load_project(pid)
+    except Exception as e:
+        st.exception(e); return
+    if row is None:
+        st.warning("Row not found in DB.")
+    else:
+        st.json(row)
+
+    st.divider()
+    st.markdown("### Probe UPDATE permissions")
+    st.markdown(
+        '<p class="wz-quiet" style="font-size:0.85rem;">'
+        "Sends <code>UPDATE projects SET step=999 WHERE id=&lt;pid&gt;</code>. "
+        "If <strong>rows_returned == 0</strong>, the anon key cannot UPDATE the "
+        "row — that's why state isn't persisting across sessions."
+        '</p>',
+        unsafe_allow_html=True,
+    )
+    if st.button("Run probe", type="primary", key="dbg_probe"):
+        try:
+            res = (
+                persistence._client()
+                .table("projects")
+                .update({"step": 999})
+                .eq("id", pid)
+                .execute()
+            )
+            st.json({
+                "rows_returned": len(res.data) if isinstance(res.data, list) else None,
+                "data": res.data,
+            })
+        except Exception as e:
+            st.exception(e)
+        st.markdown("#### Re-read row after probe")
+        try:
+            row2 = persistence.load_project(pid)
+            st.write(f"step now: {row2.get('step') if row2 else None}")
+            st.json(row2 or {})
+        except Exception as e:
+            st.exception(e)
+
+
+if (st.query_params.get("debug") or "") == "verify":
+    _debug_persistence()
+    st.stop()
+
+
 _gate()
 init_state()
 

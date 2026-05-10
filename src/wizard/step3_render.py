@@ -232,34 +232,64 @@ def _render_running():
 
         return final_path
 
+    # Capture pid + configured BEFORE the long asyncio.run() block. Streamlit
+    # Cloud may roll/reconnect the session during a 2+ minute blocking call
+    # and session_state can come back without project_id — that's how the
+    # post-render auto_save silently lost step=3 + result.
+    captured_pid = st.session_state.get("project_id")
+    persistence_configured = persistence.is_configured()
+    started_at = st.session_state.get("render_started_at", time.time())
+
     try:
         episode_dir.mkdir(parents=True, exist_ok=True)
         final_path = asyncio.run(driver())
-        elapsed = time.time() - st.session_state.render_started_at
+        elapsed = time.time() - started_at
 
         # Upload the rendered video to Storage so it survives Streamlit Cloud's
         # disk wipe + lets recipients of the share-link play it without rerendering.
-        # Best-effort — failure here doesn't block the done page.
         video_storage_key = None
-        pid = st.session_state.get("project_id")
-        if pid and persistence.is_configured() and final_path.exists():
+        if captured_pid and persistence_configured and final_path.exists():
             try:
                 video_storage_key = persistence.upload_episode_video(
-                    pid, slug, final_path.read_bytes(),
+                    captured_pid, slug, final_path.read_bytes(),
                 )
             except Exception as e:
                 st.toast(f"Cloud upload failed: {type(e).__name__}", icon="⚠️")
 
-        st.session_state.result = {
+        result_blob = {
             "elapsed": elapsed,
             "cost": estimate_episode(segments)["cost_usd"],
             "title": title,
             "slug": slug,
             "video_storage_key": video_storage_key,
         }
+
+        st.session_state.result = result_blob
         st.session_state.render_phase = "done"
-        # Persist the result blob to the cloud project row so a fresh session
-        # opening this URL can hop straight to the done page.
+        st.session_state.step = 3
+        # Restore project_id if Streamlit dropped it during the await.
+        if captured_pid and not st.session_state.get("project_id"):
+            st.session_state.project_id = captured_pid
+
+        # Direct save using captured_pid — avoids relying on session_state
+        # being intact after the long async block.
+        if captured_pid and persistence_configured:
+            try:
+                n = persistence.save_state(
+                    captured_pid,
+                    step=3,
+                    result=result_blob,
+                )
+                if n == 0:
+                    persistence.upsert_state(
+                        captured_pid,
+                        step=3,
+                        result=result_blob,
+                    )
+            except Exception:
+                st.toast("Failed to persist render result to cloud", icon="⚠️")
+
+        # Also call auto_save for the full state snapshot (cast, segments, …).
         auto_save()
         st.rerun()
     except Exception as e:

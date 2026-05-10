@@ -144,23 +144,37 @@ def ensure_project_id() -> Optional[str]:
 
 def auto_save() -> None:
     """Persist session_state to Supabase. Best-effort, idempotent, no-op if
-    persistence isn't configured."""
+    persistence isn't configured.
+
+    When the UPDATE matches zero rows (row was deleted/never-created, or RLS
+    silently blocked it), we fall back to UPSERT so we don't silently lose
+    state. This is what made the share-link round-trip flaky — the
+    in-session state advanced through steps but the row was stuck on the
+    initial values.
+    """
     s = st.session_state
     pid = s.get("project_id")
     if not pid or not persistence.is_configured():
         return
+    payload = dict(
+        title=s.get("title", "") or "",
+        cast_data=persistence.serialize_cast(s.get("cast", {})),
+        segments_data=list(s.get("segments", [])),
+        step=int(s.get("step", 1)),
+        share_keys=bool(s.get("share_keys", False)),
+        result=s.get("result"),
+    )
     try:
-        persistence.save_state(
-            pid,
-            title=s.get("title", "") or "",
-            cast_data=persistence.serialize_cast(s.get("cast", {})),
-            segments_data=list(s.get("segments", [])),
-            step=int(s.get("step", 1)),
-            share_keys=bool(s.get("share_keys", False)),
-            result=s.get("result"),
-        )
+        n = persistence.save_state(pid, **payload)
     except Exception as e:
         st.toast(f"Auto-save failed: {type(e).__name__}", icon="⚠️")
+        return
+    if n == 0:
+        # Row missing or UPDATE silently blocked — fall back to upsert.
+        try:
+            persistence.upsert_state(pid, **payload)
+        except Exception as e:
+            st.toast(f"Auto-save fallback failed: {type(e).__name__}", icon="⚠️")
 
 
 def _track_recent_project(project_id: str, title: str = "") -> None:
