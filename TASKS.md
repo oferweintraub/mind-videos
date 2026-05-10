@@ -226,6 +226,53 @@ Restructured the project so anyone with permission can clone it and produce vide
 
 ---
 
+### [DONE] Streamlit Wizard — Cast → Script → Render (2026-05-06)
+
+Replaced the form-y `app.py` with a guided 3-step wizard for non-developers. Live at https://mind-video-play.streamlit.app/ behind `APP_PASSWORD = "yallasanity_2026"`. Charcoal + warm-gold theme, Inter UI / Source Serif headers, hidden Streamlit chrome, custom step indicator.
+
+**Modules** (commit `3aed7ee`):
+- `src/wizard/state.py` — session state, project export/import .zip
+- `src/wizard/theme.py` — palette, CSS, step indicator, status pills
+- `src/wizard/step1_cast.py` — character builder (description + style + N candidates → pick → voice)
+- `src/wizard/step2_script.py` — segment builder (avatar + character dropdown + RTL Hebrew textarea + reorder)
+- `src/wizard/step3_render.py` — preflight + live progress + result screen
+- `app.py` — shell, gate, sidebar, step routing
+- `config/voice_previews/` — 10 pre-generated Hebrew preview MP3s (~512 KB total)
+
+**Settings drawer**: API keys (BYO), project export/import .zip (works around Streamlit Cloud's ephemeral disk), reset.
+
+---
+
+### [DONE] Phase 1: Edit + Reference image + Robust errors (2026-05-08)
+
+Three independent UX improvements:
+
+1. **Edit existing characters** (`e4e90cb`): Edit button on each cast tile. Change voice/tempo/display name. Optional "🎨 Regenerate images" sub-flow → pick from new candidates → Apply.
+
+2. **Reference image upload** (`6819143`): Optional file picker. When provided, routes through FLUX Kontext Pro (`fal-ai/flux-pro/kontext`) instead of Nano Banana Pro — purpose-built for "this same person, but in style X" prompts. Avoids Google's safety filter on photo refs of women + caricature.
+
+3. **Centralized friendly errors** (`c50bc96`): New `src/wizard/errors.py` translates ElevenLabs/fal.ai/Google/ffmpeg/network failures into actionable Markdown. Used across step1/step3.
+
+Plus security fix (`624706d`): per-session API key isolation. The wizard's settings drawer no longer writes user keys to `os.environ` (process-global on Streamlit Cloud). New `src/wizard/creds.py` reads keys from `st.session_state` only. Pipeline functions take explicit `*, fal_key=`, `elevenlabs_api_key=`, `google_api_key=` kwargs. fal_client uses `AsyncClient(key=...)` per call.
+
+---
+
+### [DONE] Phase 2: Cloud state + share links (Supabase) (2026-05-10)
+
+Cloud-backed projects so users can close the tab and resume later, or share a project URL with collaborators (with optional API key handoff).
+
+**Supabase setup** (`1165bf6`): One-time SQL setup file (`supabase/setup.sql`) — paste into the Supabase SQL Editor, click Run. Creates `public.projects` table + `character-images` storage bucket. RLS deliberately off — security via unguessable 12-char project IDs (~72 bits entropy). Run via Playwright/claude-in-chrome.
+
+**Persistence module** (`edb2ec4`): `src/wizard/persistence.py` with `is_configured()`, `new_project_id()`, `create_project / load_project / save_state / delete_project`, `upload/download_character_image`, `serialize_cast / deserialize_cast`, `sync_cast_images_to_storage / hydrate_cast_images_from_storage`. State helpers `ensure_project_id()` and `auto_save()` wired into every mutator.
+
+**Share-link UI + URL gate bypass** (`0822786`): Settings sidebar shows project URL + "Include my API keys in the link" toggle (default off). When the URL has `?p=<id>` and the project exists, the password gate is skipped — same trust model as Excalidraw share links.
+
+**Phase 2.6-2.9** (`32ed371`): Step-timing fix (`go_to(N)` everywhere instead of direct `st.session_state.step = N`), edit-existing now persists immediately via `add_character`, delete-project button (DELETE-to-confirm), Recent projects sidebar list (session-scoped, capped at 8).
+
+**Live**: secrets configured on Streamlit Cloud (`SUPABASE_URL`, `SUPABASE_KEY`). Round-trip verified: demo loads → URL updates to `?p=<id>` → fresh session opens same URL → state hydrates → no password needed.
+
+---
+
 ## Pending
 
 - **Record 22 lines for S2S conversion**: Record all speaking lines with correct Hebrew pronunciation and emotion → save to `output/episode1/recordings/` → run `python scripts/episode1_s2s.py convert` → regenerate videos for v5
@@ -234,3 +281,6 @@ Restructured the project so anyone with permission can clone it and produce vide
 ## Backlog (nice-to-have, not committed)
 
 - **Commit `red_haired_woman` + `red_woman_intro` as a second shipped example?** They're untracked test artifacts from the Cowork test. If the result is good, they'd serve as a non-Channel-14 demo for new users. If throwaway, `rm -rf` them.
+- **End-to-end render test on the deployed wizard** — we've never actually clicked Generate on the Supabase-backed deploy. Pipeline itself is unchanged so should work, but worth a confirmation run (~$1.50).
+- **localStorage-backed recent projects** — currently session-only. Persisting across full browser restarts requires `streamlit-local-storage` or a small JS injection.
+- **Phase 3 direction (when ready)** — see end-of-session notes: polish/robustness vs. more creator features (voice cloning, multi-language, music) vs. productize (analytics, custom domain, pricing) vs. wait-for-tester-feedback. Recommend the last until 2-3 testers actually use it.
