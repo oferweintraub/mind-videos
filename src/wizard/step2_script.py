@@ -15,7 +15,7 @@ import streamlit as st
 
 from src.wizard.state import (
     add_segment, remove_segment, move_segment, estimate_segment_seconds,
-    estimate_episode,
+    estimate_episode, go_to,
 )
 from src.wizard.theme import PALETTE
 
@@ -25,7 +25,7 @@ def render():
     if not cast:
         st.warning("No cast yet — go back to Step 1 to add characters.")
         if st.button("← Back to Step 1"):
-            st.session_state.step = 1
+            go_to(1)
             st.rerun()
         return
 
@@ -168,7 +168,7 @@ def render():
 
     with nav_back:
         if st.button("← Back", key="step2_back", width="stretch"):
-            st.session_state.step = 1
+            go_to(1)
             st.rerun()
 
     with nav_fwd:
@@ -184,5 +184,5 @@ def render():
             width="stretch",
             key="step2_continue",
         ):
-            st.session_state.step = 3
+            go_to(3)
             st.rerun()

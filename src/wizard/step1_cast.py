@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 from src.character import Character, Voice
 from src.wizard.state import (
     add_character, remove_character, load_demo, safe_slug, DEMO_CAST_SLUGS,
+    go_to,
 )
 from src.wizard.theme import PALETTE
 from src.wizard import creds
@@ -104,7 +105,7 @@ def _render_list():
             width="stretch",
             key="step1_continue",
         ):
-            st.session_state.step = 2
+            go_to(2)
             st.rerun()
 
 
@@ -138,7 +139,7 @@ def _render_empty_state():
             ok = load_demo()
             if ok:
                 st.toast("Demo cast + script loaded", icon="⚡")
-                st.session_state.step = 2
+                # load_demo already sets step=2 internally + auto_saves
             else:
                 st.toast("Demo characters not found in repo", icon="⚠️")
             st.rerun()
@@ -929,7 +930,8 @@ def _apply_edit_existing():
     # Save manifest
     char.save()
 
-    # Refresh in-memory cast (the dataclass is mutated in place; just re-store)
-    st.session_state.cast[slug] = char
+    # Refresh in-memory cast + push to cloud (uploads new image if regen, saves
+    # metadata) via add_character which handles both.
+    add_character(char)
 
     st.toast(f"Updated {char.display_name}", icon="✅")

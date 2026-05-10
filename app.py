@@ -128,6 +128,35 @@ def _settings_drawer():
             unsafe_allow_html=True,
         )
 
+        # ── Recent projects in this session ────────────────────────────────
+        recent = st.session_state.get("recent_projects") or []
+        if persistence.is_configured() and len(recent) > 1:
+            st.markdown("### Recent projects")
+            cur = st.session_state.get("project_id")
+            for r in recent[:6]:
+                pid = r.get("id")
+                title = (r.get("title") or "Untitled")[:30]
+                is_current = (pid == cur)
+                label = f"{'● ' if is_current else ''}{title}"
+                if is_current:
+                    st.markdown(
+                        f'<p class="wz-tiny" style="margin:0.2rem 0; color:{PALETTE["accent"]};">'
+                        f'{label} <span style="opacity:0.6;">· current</span></p>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    if st.button(label, key=f"sb_recent_{pid}", width="stretch"):
+                        st.query_params["p"] = pid
+                        # Force re-hydration on next run
+                        st.session_state._hydrated_from_url = False
+                        st.rerun()
+            st.markdown(
+                '<p class="wz-tiny" style="margin-top:0.4rem;">'
+                'Tip: bookmark project URLs to keep them across browser sessions.'
+                '</p>',
+                unsafe_allow_html=True,
+            )
+
         # ── Share link (Phase 2: cloud-backed projects) ───────────────────
         if persistence.is_configured() and (
             st.session_state.get("cast") or st.session_state.get("segments")
@@ -227,7 +256,9 @@ def _settings_drawer():
                     st.session_state.segments = segments
                     st.session_state.title = title
                     st.session_state.loaded_zip_marker = marker
-                    st.session_state.step = 2 if segments else 1
+                    from src.wizard.state import go_to as _go_to, auto_save as _auto_save
+                    _go_to(2 if segments else 1)
+                    _auto_save()  # ensure full snapshot is persisted
                     st.toast(
                         f"Loaded {len(cast)} character(s) and "
                         f"{len(segments)} segment(s)",
@@ -240,8 +271,51 @@ def _settings_drawer():
         st.markdown("### Reset")
         if st.button("↻ Start a new project", key="sb_reset",
                      width="stretch"):
+            # Clear ?p= so the new project doesn't try to hydrate from an
+            # old ID after reset.
+            try:
+                if "p" in st.query_params:
+                    del st.query_params["p"]
+            except Exception:
+                pass
             reset_all()
             st.rerun()
+
+        # Delete-project button — only meaningful when a cloud project exists
+        if persistence.is_configured() and st.session_state.get("project_id"):
+            with st.expander("⚠ Delete this project"):
+                st.markdown(
+                    '<p class="wz-tiny">'
+                    "This permanently removes the project from the cloud, "
+                    "including its character images and any rendered videos. "
+                    "You'll be reset to a fresh blank project."
+                    '</p>',
+                    unsafe_allow_html=True,
+                )
+                confirm = st.text_input(
+                    'Type DELETE to confirm',
+                    key="sb_delete_confirm",
+                    placeholder="DELETE",
+                )
+                if st.button(
+                    "Delete permanently",
+                    key="sb_delete_go",
+                    disabled=(confirm.strip() != "DELETE"),
+                    width="stretch",
+                ):
+                    pid = st.session_state.project_id
+                    try:
+                        persistence.delete_project(pid)
+                        st.toast(f"Deleted project `{pid}`", icon="🗑️")
+                    except Exception as e:
+                        st.toast(f"Delete failed: {type(e).__name__}", icon="⚠️")
+                    try:
+                        if "p" in st.query_params:
+                            del st.query_params["p"]
+                    except Exception:
+                        pass
+                    reset_all()
+                    st.rerun()
 
         if _expected_password() and st.session_state.get("authed"):
             st.divider()

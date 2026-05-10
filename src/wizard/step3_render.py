@@ -16,7 +16,7 @@ import streamlit as st
 
 from src.pipeline.episode import generate_tts, lipsync, concat
 from src.wizard.state import (
-    estimate_episode, safe_episode_slug, export_project_zip,
+    estimate_episode, safe_episode_slug, export_project_zip, go_to,
 )
 from src.wizard.theme import PALETTE, pill
 from src.wizard import creds
@@ -92,7 +92,7 @@ def _render_preflight():
 
     with nav_back:
         if st.button("← Edit script", key="r_back", width="stretch"):
-            st.session_state.step = 2
+            go_to(2)
             st.rerun()
 
     with nav_fwd:
@@ -250,7 +250,7 @@ def _render_running():
         with nav[0]:
             if st.button("← Edit script"):
                 st.session_state.render_phase = "preflight"
-                st.session_state.step = 2
+                go_to(2)
                 st.rerun()
         with nav[2]:
             if st.button("↻ Try again", type="primary"):
@@ -324,7 +324,7 @@ def _render_done():
     with nav[0]:
         if st.button("← Edit script", key="done_back", width="stretch"):
             st.session_state.render_phase = "preflight"
-            st.session_state.step = 2
+            go_to(2)
             st.rerun()
     with nav[1]:
         if st.button("↻  Start a new project", width="stretch", key="done_new"):

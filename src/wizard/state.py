@@ -135,6 +135,7 @@ def ensure_project_id() -> Optional[str]:
             st.query_params["p"] = pid
         except Exception:
             pass
+        _track_recent_project(pid, s.get("title") or "")
         return pid
     except Exception as e:
         st.toast(f"Couldn't create cloud project: {type(e).__name__}", icon="⚠️")
@@ -161,6 +162,16 @@ def auto_save() -> None:
         st.toast(f"Auto-save failed: {type(e).__name__}", icon="⚠️")
 
 
+def _track_recent_project(project_id: str, title: str = "") -> None:
+    """Push a project_id onto the session-scoped recent list (most-recent first)."""
+    s = st.session_state
+    recent = list(s.get("recent_projects") or [])
+    # Drop any prior entry for this id, then prepend
+    recent = [r for r in recent if r.get("id") != project_id]
+    recent.insert(0, {"id": project_id, "title": title or "Untitled"})
+    s.recent_projects = recent[:8]  # cap at 8
+
+
 def hydrate_from_project(project_id: str) -> bool:
     """Replace current session_state with state from a Supabase project.
 
@@ -180,6 +191,7 @@ def hydrate_from_project(project_id: str) -> bool:
     s.step = int(row.get("step") or 1)
     s.result = row.get("result")
     s.share_keys = bool(row.get("share_keys"))
+    _track_recent_project(project_id, s.title)
     # If keys were shared, populate the per-session key inputs
     api_keys = row.get("api_keys") or {}
     if api_keys:
