@@ -91,6 +91,7 @@ def load_demo() -> bool:
     s.segments = [dict(seg) for seg in DEMO_SEGMENTS]  # copy
     s.title = DEMO_TITLE
     s.demo_loaded = True
+    s.step = 2  # demo skips straight to script step
     # Persist + push character images to storage
     pid = ensure_project_id()
     if pid:

@@ -56,6 +56,20 @@ def _gate():
     expected = _expected_password()
     if not expected or st.session_state.get("authed"):
         return
+
+    # If the URL carries a valid project ID, that IS the access token —
+    # skip the password gate. The project_id is unguessable (72 bits) and
+    # users explicitly share it with collaborators. Same trust model as
+    # Excalidraw / Figma share links.
+    pid = (st.query_params.get("p") or "").strip() if hasattr(st, "query_params") else ""
+    if pid and persistence.is_configured():
+        try:
+            if persistence.load_project(pid) is not None:
+                st.session_state.authed = True
+                return
+        except Exception:
+            pass  # fall through to password gate
+
     st.markdown(
         f'<div style="max-width:380px; margin: 8vh auto 0 auto;">',
         unsafe_allow_html=True,
@@ -113,6 +127,69 @@ def _settings_drawer():
             '</p>',
             unsafe_allow_html=True,
         )
+
+        # ── Share link (Phase 2: cloud-backed projects) ───────────────────
+        if persistence.is_configured() and (
+            st.session_state.get("cast") or st.session_state.get("segments")
+        ):
+            st.markdown("### Share")
+            pid = st.session_state.get("project_id")
+            if pid:
+                base = "https://mind-video-play.streamlit.app"
+                share_url = f"{base}/?p={pid}"
+                st.markdown(
+                    '<p class="wz-quiet" style="font-size:0.82rem;">'
+                    'Anyone with this URL can open this project and continue '
+                    "where you left off. Don't share with strangers."
+                    '</p>',
+                    unsafe_allow_html=True,
+                )
+                st.code(share_url, language=None)
+
+                # Optional: include the original creator's API keys in the row
+                # so the recipient inherits them. Default OFF — recipient
+                # normally has to bring their own keys.
+                share_keys_now = st.checkbox(
+                    "Include my API keys in the link",
+                    value=bool(st.session_state.get("share_keys", False)),
+                    help=(
+                        "Off (recommended): recipient pastes their own keys. "
+                        "On: recipient inherits yours — they spend YOUR "
+                        "fal.ai / ElevenLabs balance. Use only with people "
+                        "you trust."
+                    ),
+                    key="sb_share_keys_toggle",
+                )
+                # Persist the toggle + keys (or null them out) to the row
+                if share_keys_now != st.session_state.get("share_keys", False):
+                    st.session_state.share_keys = share_keys_now
+                    api_keys = None
+                    if share_keys_now:
+                        api_keys = {
+                            "fal": st.session_state.get("_key_FAL_KEY", "") or "",
+                            "elevenlabs": st.session_state.get("_key_ELEVENLABS_API_KEY", "") or "",
+                            "google": st.session_state.get("_key_GOOGLE_API_KEY", "") or "",
+                        }
+                    else:
+                        api_keys = {}  # explicit clear (jsonb null gets weird)
+                    try:
+                        persistence.save_state(
+                            pid, share_keys=share_keys_now, api_keys=api_keys,
+                        )
+                        st.toast(
+                            "Keys included in share link"
+                            if share_keys_now
+                            else "Keys cleared from share link",
+                            icon="🔑" if share_keys_now else "✅",
+                        )
+                    except Exception as e:
+                        st.toast(f"Couldn't update share settings: {type(e).__name__}", icon="⚠️")
+            else:
+                st.markdown(
+                    '<p class="wz-tiny">Add a character or load the demo to '
+                    'get a shareable URL.</p>',
+                    unsafe_allow_html=True,
+                )
 
         st.markdown("### Project")
 
