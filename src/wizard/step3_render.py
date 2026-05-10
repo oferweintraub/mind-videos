@@ -17,9 +17,10 @@ import streamlit as st
 from src.pipeline.episode import generate_tts, lipsync, concat
 from src.wizard.state import (
     estimate_episode, safe_episode_slug, export_project_zip, go_to,
+    auto_save,
 )
 from src.wizard.theme import PALETTE, pill
-from src.wizard import creds
+from src.wizard import creds, persistence
 from src.wizard.errors import friendly_error
 
 
@@ -235,14 +236,31 @@ def _render_running():
         episode_dir.mkdir(parents=True, exist_ok=True)
         final_path = asyncio.run(driver())
         elapsed = time.time() - st.session_state.render_started_at
+
+        # Upload the rendered video to Storage so it survives Streamlit Cloud's
+        # disk wipe + lets recipients of the share-link play it without rerendering.
+        # Best-effort — failure here doesn't block the done page.
+        video_storage_key = None
+        pid = st.session_state.get("project_id")
+        if pid and persistence.is_configured() and final_path.exists():
+            try:
+                video_storage_key = persistence.upload_episode_video(
+                    pid, slug, final_path.read_bytes(),
+                )
+            except Exception as e:
+                st.toast(f"Cloud upload failed: {type(e).__name__}", icon="⚠️")
+
         st.session_state.result = {
-            "path": str(final_path),
             "elapsed": elapsed,
             "cost": estimate_episode(segments)["cost_usd"],
             "title": title,
             "slug": slug,
+            "video_storage_key": video_storage_key,
         }
         st.session_state.render_phase = "done"
+        # Persist the result blob to the cloud project row so a fresh session
+        # opening this URL can hop straight to the done page.
+        auto_save()
         st.rerun()
     except Exception as e:
         st.error(f"**Render failed.** {friendly_error(e)}")
@@ -262,8 +280,22 @@ def _render_running():
 
 def _render_done():
     result = st.session_state.result
-    final_path = Path(result["path"])
     title = result["title"]
+
+    # Reconstruct the local path from the slug (cloud-portable) — older rows
+    # stored an absolute "path" that's only valid on the rendering machine.
+    slug = result.get("slug") or safe_episode_slug(title)
+    final_path = EPISODES_DIR / slug / "final.mp4"
+
+    # Cross-session resume: when a recipient opens the share-link, the local
+    # disk doesn't have the rendered file. Pull it from Storage.
+    if not final_path.exists() and persistence.is_configured():
+        pid = st.session_state.get("project_id")
+        if pid:
+            data = persistence.download_episode_video(pid, slug)
+            if data:
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+                final_path.write_bytes(data)
 
     st.markdown(f'# *{title}* is ready')
     st.markdown(

@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 from src.character import Character, Voice
 from src.wizard.state import (
     add_character, remove_character, load_demo, safe_slug, DEMO_CAST_SLUGS,
-    go_to,
+    go_to, invalidate_episode_for_character,
 )
 from src.wizard.theme import PALETTE
 from src.wizard import creds
@@ -910,17 +910,26 @@ def _apply_edit_existing():
     if char is None:
         return
 
+    # Detect what's changing — voice/tempo/image changes invalidate cached
+    # pipeline output, but display_name alone does not.
+    new_tempo = TEMPO_PRESETS[edit["tempo_label"]]
+    voice_changed = (
+        char.voice.voice_id != edit["voice_id"]
+        or char.voice.tempo != new_tempo
+    )
+    image_changed = edit["regen_picked"] is not None
+
     # Update mutable metadata
     char.display_name = (edit["display_name"] or "").strip() or char.display_name
     char.voice.voice_id = edit["voice_id"]
-    char.voice.tempo = TEMPO_PRESETS[edit["tempo_label"]]
+    char.voice.tempo = new_tempo
     # Refresh voice_name from the catalog if possible
     voice_meta = next((v for v in _voice_catalog() if v["id"] == edit["voice_id"]), None)
     if voice_meta:
         char.voice.voice_name = voice_meta["name"]
 
     # If the user picked a regen candidate, copy it onto the character image
-    if edit["regen_picked"] is not None:
+    if image_changed:
         src_path = Path(next(
             c["path"] for c in edit["regen_candidates"] if c["idx"] == edit["regen_picked"]
         ))
@@ -933,5 +942,15 @@ def _apply_edit_existing():
     # Refresh in-memory cast + push to cloud (uploads new image if regen, saves
     # metadata) via add_character which handles both.
     add_character(char)
+
+    # Drop cached audio/lip-sync videos for this character so the next render
+    # picks up the new voice/tempo/image instead of replaying stale outputs.
+    if voice_changed or image_changed:
+        n = invalidate_episode_for_character(slug)
+        if n > 0:
+            st.toast(
+                f"Cleared {n} cached file(s) — next render will rebuild them",
+                icon="🔄",
+            )
 
     st.toast(f"Updated {char.display_name}", icon="✅")

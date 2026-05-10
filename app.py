@@ -7,9 +7,14 @@ Three steps: Cast → Script → Render. State lives in st.session_state and is
 persisted-on-demand via the project-export .zip in the Settings drawer.
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
+
+# Surface module-level prints/logs in Streamlit Cloud's runtime panel.
+log = logging.getLogger("mind-video")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s mind-video %(levelname)s %(message)s")
 
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
@@ -62,13 +67,22 @@ def _gate():
     # users explicitly share it with collaborators. Same trust model as
     # Excalidraw / Figma share links.
     pid = (st.query_params.get("p") or "").strip() if hasattr(st, "query_params") else ""
-    if pid and persistence.is_configured():
-        try:
-            if persistence.load_project(pid) is not None:
-                st.session_state.authed = True
-                return
-        except Exception:
-            pass  # fall through to password gate
+    log.info("gate enter pid=%r authed=%r configured=%r",
+             pid, st.session_state.get("authed"), persistence.is_configured())
+    if pid:
+        if not persistence.is_configured():
+            log.warning("gate: pid present but persistence is_configured()=False")
+        else:
+            try:
+                row = persistence.load_project(pid)
+                if row is not None:
+                    log.info("gate: bypass OK for pid=%s", pid)
+                    st.session_state.authed = True
+                    return
+                else:
+                    log.warning("gate: load_project(%s) returned None", pid)
+            except Exception:
+                log.exception("gate: load_project(%s) raised", pid)
 
     st.markdown(
         f'<div style="max-width:380px; margin: 8vh auto 0 auto;">',
@@ -339,15 +353,25 @@ def _hydrate_from_url():
     if st.session_state.get("_hydrated_from_url"):
         return
     pid = (st.query_params.get("p") or "").strip() if hasattr(st, "query_params") else ""
+    log.info("hydrate_from_url pid=%r configured=%r",
+             pid, persistence.is_configured())
     if not pid:
         st.session_state._hydrated_from_url = True
         return
     if not persistence.is_configured():
+        log.warning("hydrate_from_url: persistence is_configured()=False; skipping")
         st.session_state._hydrated_from_url = True
         return
-    if hydrate_from_project(pid):
+    try:
+        ok = hydrate_from_project(pid)
+    except Exception:
+        log.exception("hydrate_from_url: hydrate_from_project(%s) raised", pid)
+        ok = False
+    if ok:
+        log.info("hydrate_from_url: hydrated OK from pid=%s", pid)
         st.session_state._hydrated_from_url = True
     else:
+        log.warning("hydrate_from_url: hydrate_from_project(%s) returned False; clearing ?p=", pid)
         # Project doesn't exist — clear the URL param so we don't get stuck
         try:
             del st.query_params["p"]

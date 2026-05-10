@@ -17,6 +17,7 @@ runner workable for developers who don't want a Supabase project.
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import secrets
 from dataclasses import asdict
@@ -27,6 +28,7 @@ import streamlit as st
 
 
 _BUCKET = "character-images"
+log = logging.getLogger("mind-video.persistence")
 
 
 def _read_secret(name: str) -> Optional[str]:
@@ -35,13 +37,23 @@ def _read_secret(name: str) -> Optional[str]:
         v = st.secrets[name]
         if v:
             return str(v).strip()
-    except Exception:
-        pass
-    return (os.environ.get(name) or "").strip() or None
+    except Exception as e:
+        # Don't log a full traceback for missing keys — st.secrets raises
+        # KeyError when a key isn't present, and that's expected during
+        # local dev. Only log unusual exceptions.
+        if not isinstance(e, KeyError):
+            log.warning("_read_secret(%s): st.secrets raised %s: %s", name, type(e).__name__, e)
+    env_val = (os.environ.get(name) or "").strip() or None
+    return env_val
 
 
 def is_configured() -> bool:
-    return bool(_read_secret("SUPABASE_URL")) and bool(_read_secret("SUPABASE_KEY"))
+    url = _read_secret("SUPABASE_URL")
+    key = _read_secret("SUPABASE_KEY")
+    ok = bool(url) and bool(key)
+    if not ok:
+        log.info("is_configured: url_set=%s key_set=%s", bool(url), bool(key))
+    return ok
 
 
 @st.cache_resource
@@ -75,13 +87,19 @@ def create_project(project_id: str, title: str = "") -> dict:
 
 def load_project(project_id: str) -> Optional[dict]:
     """Fetch a project row by ID. Returns None if not found."""
-    res = (
-        _client().table("projects")
-        .select("*")
-        .eq("id", project_id)
-        .limit(1)
-        .execute()
-    )
+    try:
+        res = (
+            _client().table("projects")
+            .select("*")
+            .eq("id", project_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        log.exception("load_project(%s): query raised", project_id)
+        raise
+    n = len(res.data or [])
+    log.info("load_project(%s): rows=%d", project_id, n)
     return res.data[0] if res.data else None
 
 
@@ -153,6 +171,33 @@ def list_project_objects(project_id: str) -> list[str]:
         return [f["name"] for f in files if f.get("name")]
     except Exception:
         return []
+
+
+# ---------------------------------------------------------------------------
+# Episode video CRUD (storage bucket — same bucket as character images)
+# ---------------------------------------------------------------------------
+
+def _episode_video_key(project_id: str, slug: str) -> str:
+    return f"{project_id}/episode_{slug}.mp4"
+
+
+def upload_episode_video(project_id: str, slug: str, video_bytes: bytes) -> str:
+    """Upload (or overwrite) a rendered episode mp4. Returns the storage key."""
+    key = _episode_video_key(project_id, slug)
+    _client().storage.from_(_BUCKET).upload(
+        path=key,
+        file=video_bytes,
+        file_options={"content-type": "video/mp4", "upsert": "true"},
+    )
+    return key
+
+
+def download_episode_video(project_id: str, slug: str) -> Optional[bytes]:
+    """Download a rendered episode mp4. Returns bytes or None if missing."""
+    try:
+        return _client().storage.from_(_BUCKET).download(_episode_video_key(project_id, slug))
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
