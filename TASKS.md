@@ -273,6 +273,25 @@ Cloud-backed projects so users can close the tab and resume later, or share a pr
 
 ---
 
+### [DONE] Usability pass: ref-image bugs + prominent share UX (2026-05-11)
+
+User feedback:
+1. "Can't remove ref image" — `st.file_uploader` retained the file in widget state, our clear of `draft["ref_image_bytes"]` got overwritten on rerun
+2. "With ref image no Nano Banana images created" — works locally; cloud-side it was UI plumbing/visibility, not the FLUX endpoint
+3. "How do I share the project mid-work with all PIs intact — not clear" — share URL was buried in sidebar drawer with no copy button and a hard-to-find keys toggle
+
+**Fixes** (`cca25a8` → `ab295fb`):
+
+1. **Remove-reference uploader fix**: bust the file_uploader's `key=` via a counter on the draft. On Remove → increment counter → widget remounts empty. Verified live: ref preview + Remove button vanish after click.
+
+2. **FLUX Kontext logging + local smoke test**: `scripts/test_flux_kontext.py` calls `generate_with_ref` end-to-end. Confirmed it produces a 161 KB output PNG. Added `log.info` / `log.exception` around the FLUX call paths so future failures surface in the cloud Manage panel.
+
+3. **Prominent "🔗 / 🔑 Share project" header button + `st.dialog`**: visible whenever a project exists. Opens a dialog with the URL in a code block + a clear "API keys ARE / NOT in this link" status banner + a prominent toggle. The header icon switches to 🔑 (warm-gold key) when keys are bundled, so you can see at-a-glance whether you're sharing them. Verified cross-session: opening the share URL with `share_keys=true` in a fresh tab auto-fills all three API key fields in the sidebar — recipient can render without pasting anything.
+
+4. **Suppress noisy `_read_secret` warnings in local dev**: `st.secrets` raises `StreamlitSecretNotFoundError` on machines without a `secrets.toml`; that's normal, no need to warn.
+
+---
+
 ### [DONE] Phase 2 robustness audit + fixes (2026-05-11)
 
 Comprehensive 8-dimension audit of the cloud wizard. Verdict: capability is broadly there; three real gaps to close + one pre-existing regression discovered during paid validation.
