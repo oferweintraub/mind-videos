@@ -20,7 +20,6 @@ import base64
 import logging
 import os
 import secrets
-import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
@@ -29,16 +28,11 @@ import streamlit as st
 
 
 _BUCKET = "character-images"
-# Use the root "mind-video" logger so we share app.py's handler config. The
-# child-logger pattern caused log entries to drop in production for reasons
-# I don't yet understand.
+# Use the root "mind-video" logger so persistence log entries are routed
+# through the basicConfig handler installed in app.py. Earlier attempts to
+# use a child logger ("mind-video.persistence") silently dropped entries
+# under Streamlit Cloud's runtime — keep the flat logger name.
 log = logging.getLogger("mind-video")
-
-def _trace(msg: str) -> None:
-    """Belt-and-suspenders diagnostic: also dump to stderr in case the logger
-    isn't routing properly on Streamlit Cloud."""
-    print(f"[persistence] {msg}", file=sys.stderr, flush=True)
-    log.info("persistence: %s", msg)
 
 
 def _read_secret(name: str) -> Optional[str]:
@@ -141,7 +135,6 @@ def save_state(
     if api_keys is not None: update["api_keys"] = api_keys
     if not update:
         return 0
-    _trace(f"save_state ENTER pid={project_id} keys={sorted(update.keys())} step={update.get('step')}")
     try:
         res = (
             _client().table("projects")
@@ -150,12 +143,12 @@ def save_state(
             .execute()
         )
     except Exception:
-        _trace(f"save_state RAISED pid={project_id}")
         log.exception("save_state(pid=%s) UPDATE raised; keys=%s",
                       project_id, sorted(update.keys()))
         raise
     n = len(res.data) if isinstance(res.data, list) else 0
-    _trace(f"save_state DONE pid={project_id} rows={n}")
+    log.info("save_state(pid=%s) UPDATE keys=%s rows=%d",
+             project_id, sorted(update.keys()), n)
     if n == 0:
         log.warning(
             "save_state(pid=%s) 0 rows updated — pid missing from DB or "

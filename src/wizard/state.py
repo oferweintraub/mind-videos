@@ -152,12 +152,8 @@ def auto_save() -> None:
     in-session state advanced through steps but the row was stuck on the
     initial values.
     """
-    import sys
     s = st.session_state
     pid = s.get("project_id")
-    step_val = s.get("step")
-    print(f"[auto_save] called pid={pid!r} step={step_val!r} configured={persistence.is_configured()}",
-          file=sys.stderr, flush=True)
     if not pid or not persistence.is_configured():
         return
     payload = dict(
