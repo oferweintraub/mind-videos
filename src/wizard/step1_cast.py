@@ -215,6 +215,11 @@ def _enter_edit_mode():
         # FLUX Kontext Pro (fal.ai) instead of Nano Banana Pro
         "ref_image_bytes": None,
         "ref_image_name": "",
+        # Counter for busting the file_uploader's widget key when the user
+        # clicks "Remove reference". Streamlit retains uploaded files in widget
+        # state — the only reliable way to clear them is to remount with a
+        # fresh key.
+        "ref_counter": 0,
     }
 
 
@@ -282,11 +287,14 @@ def _render_edit():
         '</p>',
         unsafe_allow_html=True,
     )
+    # Bust the file_uploader key when Remove is clicked — otherwise the
+    # widget keeps its prior file in state and re-populates draft on rerun.
+    ref_counter = draft.get("ref_counter", 0)
     ref_upload = st.file_uploader(
         "Reference image",
         type=["png", "jpg", "jpeg", "webp"],
         label_visibility="collapsed",
-        key="draft_ref_upload",
+        key=f"draft_ref_upload_{ref_counter}",
     )
     if ref_upload is not None:
         draft["ref_image_bytes"] = ref_upload.getvalue()
@@ -307,6 +315,7 @@ def _render_edit():
             if st.button("Remove reference", key="draft_ref_remove"):
                 draft["ref_image_bytes"] = None
                 draft["ref_image_name"] = ""
+                draft["ref_counter"] = ref_counter + 1  # remount uploader
                 st.rerun()
 
     # 2. Style — one or compare

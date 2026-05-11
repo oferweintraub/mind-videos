@@ -15,6 +15,7 @@ then we download and store under characters/_candidates/<slug>/option_N.png.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from pathlib import Path
 from typing import Optional
@@ -27,6 +28,8 @@ from google.genai import types
 
 # Re-exported from scripts/character_lab.py — same prompt builder
 from scripts.character_lab import build_prompt
+
+log = logging.getLogger("mind-video")
 
 
 # ----------------------------------------------------------------------------
@@ -101,26 +104,35 @@ async def generate_with_ref(
     if not ref_image_path.exists():
         raise FileNotFoundError(f"Reference image missing: {ref_image_path}")
 
+    log.info("generate_with_ref style=%s ref=%s", style, ref_image_path.name)
     client = fal_client.AsyncClient(key=fal_key)
 
     # Upload the reference; fal returns a CDN URL we can pass to the model.
-    ref_url = await client.upload_file(str(ref_image_path))
+    try:
+        ref_url = await client.upload_file(str(ref_image_path))
+    except Exception:
+        log.exception("generate_with_ref: upload_file raised")
+        raise
 
     prompt = _REF_PROMPT_TEMPLATE.format(style_clause=_style_clause(style))
     if description:
         prompt = f"{prompt} Character description for additional context: {description}"
 
-    handler = await client.submit(
-        "fal-ai/flux-pro/kontext",
-        arguments={
-            "image_url": ref_url,
-            "prompt": prompt,
-            "aspect_ratio": "9:16",
-            "guidance_scale": 3.5,
-            "num_inference_steps": 28,
-            "safety_tolerance": "5",
-        },
-    )
+    try:
+        handler = await client.submit(
+            "fal-ai/flux-pro/kontext",
+            arguments={
+                "image_url": ref_url,
+                "prompt": prompt,
+                "aspect_ratio": "9:16",
+                "guidance_scale": 3.5,
+                "num_inference_steps": 28,
+                "safety_tolerance": "5",
+            },
+        )
+    except Exception:
+        log.exception("generate_with_ref: submit raised")
+        raise
 
     # Poll until done. Typical FLUX Kontext runtime: 6-15s.
     while True:
@@ -132,6 +144,7 @@ async def generate_with_ref(
     result = await handler.get()
     images = result.get("images") or []
     if not images:
+        log.warning("FLUX Kontext returned no images: %s", result)
         raise RuntimeError(f"FLUX Kontext returned no image: {result}")
     image_url = images[0].get("url")
     if not image_url:
@@ -141,4 +154,5 @@ async def generate_with_ref(
         resp = await http.get(image_url)
         resp.raise_for_status()
         output_path.write_bytes(resp.content)
+    log.info("generate_with_ref OK style=%s bytes=%d", style, len(resp.content))
     return output_path
