@@ -273,6 +273,34 @@ Cloud-backed projects so users can close the tab and resume later, or share a pr
 
 ---
 
+### [DONE] Phase 2 robustness audit + fixes (2026-05-11)
+
+Comprehensive 8-dimension audit of the cloud wizard. Verdict: capability is broadly there; three real gaps to close + one pre-existing regression discovered during paid validation.
+
+**Code changes** (`494205a` → `e01340a` → `ce5f37d` → `771515c`):
+
+1. **Final video uploaded to Supabase Storage** (`persistence.upload_episode_video` / `download_episode_video`). Render writes the mp4 to the `character-images` bucket using `<project_id>/episode_<slug>.mp4`; done page hydrates from Storage when local file is missing. Cross-session resume now plays the rendered video without re-rendering.
+
+2. **`auto_save` persists the `result` blob**. Previously `save_state` was called without `result`, so cross-session hydration of step=3/done was impossible. Result-blob no longer stores a machine-specific `path` — uses `slug` + Storage key.
+
+3. **Cache invalidation on character edit**. New `invalidate_episode_for_character(slug)` in state.py deletes cached `audio/seg*_<slug>.{mp3,mp3_raw}`, `videos/seg*_<slug>.mp4`, and the episode's `final.mp4` whenever a character's voice / tempo / image changes. Display-name-only edits don't invalidate.
+
+4. **`save_state` returns rows-updated + upsert fallback**. The single largest bug: previously `save_state` discarded the supabase-py response, so a 0-rows UPDATE (RLS, missing row, key-scope) was silently swallowed. Now logs `rows=N` and falls back to `upsert_state` on 0.
+
+5. **Gate-bypass diagnostic logging**. `app.py:_gate` and `_hydrate_from_url` now log every entry + outcome. Confirmed the original "regression" was just a stale URL pointing to a row that didn't exist in the current Supabase project, not a code bug.
+
+6. **`?debug=verify` endpoint**. Visit `/?debug=verify&p=<id>` to inspect the row and probe whether the anon key can UPDATE. Stays in the deployed app as ongoing instrumentation.
+
+**Cloud-verified**:
+- Two paid renders at $1.13 each ($2.26 total): `KjiQpIEkc1U1` and `XsdAl4bOUzXK`. Both completed in ~2 min, video plays inline + downloads.
+- Fresh project `JLnKeGS5Xt8v` (post-`ce5f37d`): `step=2` persists in row after Load demo. Bug fully fixed.
+
+**AppTest harness**: 44/44 across `scripts/audit_apptest.py` and `scripts/audit_reedit.py` (state mutators, edit-existing flow, invalidator, cross-session resume logic).
+
+**Key learning**: Streamlit Cloud's deploy is **sticky-per-session** — `git push` only loads new code into NEW worker processes; tabs that were open before the push keep being served by an OLD worker until they fully reload. This is what masked the persistence fix for ~20 minutes between e01340a deploy and the next browser restart.
+
+---
+
 ## Pending
 
 - **Record 22 lines for S2S conversion**: Record all speaking lines with correct Hebrew pronunciation and emotion → save to `output/episode1/recordings/` → run `python scripts/episode1_s2s.py convert` → regenerate videos for v5
@@ -281,6 +309,6 @@ Cloud-backed projects so users can close the tab and resume later, or share a pr
 ## Backlog (nice-to-have, not committed)
 
 - **Commit `red_haired_woman` + `red_woman_intro` as a second shipped example?** They're untracked test artifacts from the Cowork test. If the result is good, they'd serve as a non-Channel-14 demo for new users. If throwaway, `rm -rf` them.
-- **End-to-end render test on the deployed wizard** — we've never actually clicked Generate on the Supabase-backed deploy. Pipeline itself is unchanged so should work, but worth a confirmation run (~$1.50).
+- ~~**End-to-end render test on the deployed wizard**~~ ✅ DONE 2026-05-11 — two paid renders confirmed.
 - **localStorage-backed recent projects** — currently session-only. Persisting across full browser restarts requires `streamlit-local-storage` or a small JS injection.
 - **Phase 3 direction (when ready)** — see end-of-session notes: polish/robustness vs. more creator features (voice cloning, multi-language, music) vs. productize (analytics, custom domain, pricing) vs. wait-for-tester-feedback. Recommend the last until 2-3 testers actually use it.
