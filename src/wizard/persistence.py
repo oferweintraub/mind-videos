@@ -36,19 +36,19 @@ log = logging.getLogger("mind-video")
 
 
 def _read_secret(name: str) -> Optional[str]:
-    """Read SUPABASE_URL or SUPABASE_KEY from secrets, env, in that order."""
+    """Read SUPABASE_URL or SUPABASE_KEY from secrets, env, in that order.
+
+    st.secrets can raise both KeyError (key missing) and
+    StreamlitSecretNotFoundError (no secrets.toml). Both are normal for local
+    dev — silently fall through to env in either case.
+    """
     try:
         v = st.secrets[name]
         if v:
             return str(v).strip()
-    except Exception as e:
-        # Don't log a full traceback for missing keys — st.secrets raises
-        # KeyError when a key isn't present, and that's expected during
-        # local dev. Only log unusual exceptions.
-        if not isinstance(e, KeyError):
-            log.warning("_read_secret(%s): st.secrets raised %s: %s", name, type(e).__name__, e)
-    env_val = (os.environ.get(name) or "").strip() or None
-    return env_val
+    except Exception:
+        pass  # fall through to env
+    return (os.environ.get(name) or "").strip() or None
 
 
 def is_configured() -> bool:
