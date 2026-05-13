@@ -38,7 +38,7 @@ VOICES_YAML = ROOT / "config" / "voices.yaml"
 PREVIEWS_DIR = ROOT / "config" / "voice_previews"
 MAX_CAST_SIZE = 4
 
-STYLE_OPTIONS = ["lego", "muppet", "pixar", "ghibli", "comic", "anime", "south_park"]
+STYLE_OPTIONS = ["realistic", "lego", "muppet", "pixar", "ghibli", "comic", "anime", "south_park"]
 TEMPO_PRESETS = {"Calm": 1.0, "Natural": 1.0, "Urgent": 1.25}
 
 
@@ -241,6 +241,18 @@ def _enter_edit_existing(slug: str):
         (label for label, val in TEMPO_PRESETS.items() if val == char.voice.tempo),
         "Natural",
     )
+    # Pre-load any previously-persisted ref image so the user can see / replace
+    # it. Persistence path: characters/<slug>/ref_image.png (any extension).
+    existing_ref_bytes: Optional[bytes] = None
+    existing_ref_name = ""
+    if char.dir is not None:
+        for ext in (".png", ".jpg", ".jpeg", ".webp"):
+            p = char.dir / f"ref_image{ext}"
+            if p.exists():
+                existing_ref_bytes = p.read_bytes()
+                existing_ref_name = p.name
+                break
+
     st.session_state.step1_mode = "edit_existing"
     st.session_state.edit_existing = {
         "slug": slug,
@@ -249,6 +261,12 @@ def _enter_edit_existing(slug: str):
         "style": char.style,
         "voice_id": char.voice.voice_id,
         "tempo_label": tempo_label,
+        # Ref image — optional. If the original character was created with one
+        # and we persisted it, we pre-load it here so the user can see it.
+        "ref_image_bytes": existing_ref_bytes,
+        "ref_image_name": existing_ref_name,
+        "ref_counter": 0,      # busts the file_uploader key on Remove
+        "ref_changed": False,  # True when user uploaded/removed in this session
         # Regen sub-state — populated when user clicks "Regenerate images"
         "regen_active": False,
         "regen_candidates": [],     # [{idx, style, path}]
@@ -281,8 +299,9 @@ def _render_edit():
     st.markdown(
         '<p class="wz-quiet" style="font-size:0.88rem;">'
         'Upload a photo of a real person or another character to lock in the face. '
-        'When provided, generation routes through <strong>FLUX Kontext Pro</strong> '
-        '(fal.ai) — better at preserving identity than text-only prompts. '
+        'Generation tries <strong>Nano Banana Pro</strong> first; if Google\'s safety '
+        'filter blocks it (common with photo refs + caricature prompts), we fall '
+        'back to <strong>FLUX Kontext Pro</strong> on fal.ai. '
         'Skip this for fully imagined characters.'
         '</p>',
         unsafe_allow_html=True,
@@ -308,7 +327,7 @@ def _render_edit():
             st.markdown(
                 f'<p class="wz-quiet" style="margin-top:0.6rem;">'
                 f'Reference: <strong>{draft["ref_image_name"]}</strong> · '
-                f'using FLUX Kontext Pro (~$0.05 per candidate)'
+                f'Nano Banana Pro with ref (FLUX Kontext fallback on safety blocks)'
                 f'</p>',
                 unsafe_allow_html=True,
             )
@@ -351,11 +370,12 @@ def _render_edit():
         else:
             draft["single_style"] = sel or "lego"
 
-        draft["count"] = st.slider(
+        draft["count"] = st.segmented_control(
             "How many variants to generate?",
-            min_value=1, max_value=4,
-            value=draft["count"], key="draft_count",
-        )
+            options=[1, 2, 3, 4],
+            default=draft["count"],
+            key="draft_count",
+        ) or draft["count"]
     else:
         # Multi-style compare
         picks = st.pills(
@@ -436,13 +456,18 @@ def _generate_candidates_for_draft():
     c = creds.read()
     use_ref = bool(draft.get("ref_image_bytes"))
 
-    # Key requirements differ per route
-    if use_ref and not c.fal:
-        st.toast("Add fal.ai key in the Settings panel — needed for FLUX Kontext (ref image)", icon="⚠️")
-        return
-    if not use_ref and not c.google:
+    # Nano Banana Pro is the primary route for both text-only and ref-image
+    # generation. fal.ai is only needed as a safety-block fallback when a ref
+    # image is in play.
+    if not c.google:
         st.toast("Add Google AI key in the Settings panel first", icon="⚠️")
         return
+    if use_ref and not c.fal:
+        st.toast(
+            "Heads up: with a reference image we may need fal.ai as a safety-filter fallback. "
+            "Trying Nano Banana Pro alone for now.",
+            icon="ℹ️",
+        )
 
     # Generate a session-local slug for the candidates dir
     if not draft["slug"]:
@@ -454,8 +479,8 @@ def _generate_candidates_for_draft():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # If ref bytes are attached, save them to the candidates dir so FLUX Kontext
-    # has a stable file path to upload.
+    # If ref bytes are attached, save them to the candidates dir so both
+    # Nano Banana (read bytes) and FLUX Kontext (upload path) can use them.
     ref_path: Optional[Path] = None
     if use_ref:
         ref_path = out_dir / "_ref.png"
@@ -467,27 +492,40 @@ def _generate_candidates_for_draft():
     else:
         plan = [(i, draft["single_style"]) for i in range(1, draft["count"] + 1)]
 
-    from src.pipeline.character_gen import generate_text_only, generate_with_ref
-    from scripts.character_lab import build_prompt
+    from src.pipeline.character_gen import (
+        generate_text_only, generate_with_ref, generate_with_ref_nano_banana,
+        is_google_safety_error,
+    )
 
-    async def run_all():
-        coros = []
-        for i, style in plan:
-            (out_dir / f"option_{i}_style.txt").write_text(style)
-            out_path = out_dir / f"option_{i}.png"
-            if use_ref:
-                coros.append(generate_with_ref(
+    async def _one(i: int, style: str) -> Path:
+        out_path = out_dir / f"option_{i}.png"
+        (out_dir / f"option_{i}_style.txt").write_text(style)
+        if not use_ref:
+            return await generate_text_only(
+                draft["description"], style, out_path,
+                google_api_key=c.google,
+            )
+        # Try Nano Banana with ref first; fall back to FLUX on safety blocks.
+        try:
+            return await generate_with_ref_nano_banana(
+                ref_path, draft["description"], style, out_path,
+                google_api_key=c.google,
+            )
+        except Exception as e:
+            if is_google_safety_error(e) and c.fal:
+                return await generate_with_ref(
                     ref_path, draft["description"], style, out_path,
                     fal_key=c.fal,
-                ))
-            else:
-                coros.append(generate_text_only(
-                    draft["description"], style, out_path,
-                    google_api_key=c.google,
-                ))
-        return await asyncio.gather(*coros, return_exceptions=True)
+                )
+            raise
 
-    label_route = "FLUX Kontext (ref)" if use_ref else "Nano Banana Pro"
+    async def run_all():
+        return await asyncio.gather(
+            *[_one(i, style) for i, style in plan],
+            return_exceptions=True,
+        )
+
+    label_route = "Nano Banana Pro" + (" + FLUX fallback" if use_ref and c.fal else "")
     with st.spinner(f"Generating {len(plan)} candidate{'s' if len(plan) != 1 else ''} via {label_route}…"):
         results = asyncio.run(run_all())
 
@@ -646,6 +684,15 @@ def _save_draft_as_character():
 
     src_path = Path(next(c["path"] for c in draft["candidates"] if c["idx"] == draft["picked"]))
     shutil.copy2(src_path, target_dir / "image.png")
+
+    # Persist the reference image (if any) alongside the character so future
+    # edits can show it and the user can replace/remove it.
+    if draft.get("ref_image_bytes"):
+        ref_name = draft.get("ref_image_name") or "ref_image.png"
+        ext = Path(ref_name).suffix.lower()
+        if ext not in (".png", ".jpg", ".jpeg", ".webp"):
+            ext = ".png"
+        (target_dir / f"ref_image{ext}").write_bytes(draft["ref_image_bytes"])
 
     style_label = (draft["single_style"] if not draft["compare_styles"]
                    else next(c["style"] for c in draft["candidates"] if c["idx"] == draft["picked"]))
@@ -820,9 +867,49 @@ def _render_regen_section(edit: dict):
         unsafe_allow_html=True,
     )
 
+    # Reference image — pre-loaded from disk on edit-screen entry, or
+    # uploaded/replaced/removed here. When attached, generation goes through
+    # Nano Banana with ref (FLUX Kontext fallback on safety blocks).
+    st.markdown("##### Reference image (optional)")
+    ref_counter = edit.get("ref_counter", 0)
+    ref_upload = st.file_uploader(
+        "Reference image for regenerate",
+        type=["png", "jpg", "jpeg", "webp"],
+        label_visibility="collapsed",
+        key=f"ee_ref_upload_{ref_counter}",
+    )
+    if ref_upload is not None:
+        edit["ref_image_bytes"] = ref_upload.getvalue()
+        edit["ref_image_name"] = ref_upload.name
+        edit["ref_changed"] = True
+
+    if edit.get("ref_image_bytes"):
+        c1, c2 = st.columns([1, 5])
+        with c1:
+            st.image(edit["ref_image_bytes"], width=120)
+        with c2:
+            st.markdown(
+                f'<p class="wz-quiet" style="margin-top:0.6rem;">'
+                f'Reference: <strong>{edit.get("ref_image_name") or "current"}</strong> · '
+                f'Nano Banana Pro with ref (FLUX Kontext fallback on safety blocks)'
+                f'</p>',
+                unsafe_allow_html=True,
+            )
+            if st.button("Remove reference", key="ee_ref_remove"):
+                edit["ref_image_bytes"] = None
+                edit["ref_image_name"] = ""
+                edit["ref_counter"] = ref_counter + 1
+                edit["ref_changed"] = True
+                st.rerun()
+
     cols = st.columns([1, 1, 2])
     with cols[0]:
-        count = st.slider("Variants", 1, 4, 3, key="regen_count")
+        count = st.segmented_control(
+            "Variants",
+            options=[1, 2, 3, 4],
+            default=3,
+            key="regen_count",
+        ) or 3
     with cols[1]:
         if st.button("▶ Generate", type="primary", key="regen_go", width="stretch"):
             _run_regen(edit, count=count)
@@ -865,7 +952,11 @@ def _render_regen_section(edit: dict):
 
 
 def _run_regen(edit: dict, count: int):
-    """Generate `count` candidates with the existing description + style."""
+    """Generate `count` candidates with the existing description + style.
+
+    Routes through Nano Banana with ref → FLUX Kontext on safety block when a
+    reference image is attached. Otherwise text-only Nano Banana Pro.
+    """
     c = creds.read()
     if not c.google:
         st.toast("Add Google AI key in the Settings panel first", icon="⚠️")
@@ -876,21 +967,48 @@ def _run_regen(edit: dict, count: int):
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    use_ref = bool(edit.get("ref_image_bytes"))
+    ref_path: Optional[Path] = None
+    if use_ref:
+        ref_path = out_dir / "_ref.png"
+        ref_path.write_bytes(edit["ref_image_bytes"])
+
     style = edit["style"] or "south_park"
     plan = [(i, style) for i in range(1, count + 1)]
 
-    from scripts.character_lab import build_prompt, generate_one
-    from google import genai
+    from src.pipeline.character_gen import (
+        generate_text_only, generate_with_ref, generate_with_ref_nano_banana,
+        is_google_safety_error,
+    )
+
+    async def _one(i: int, sty: str) -> Path:
+        out_path = out_dir / f"option_{i}.png"
+        if not use_ref:
+            return await generate_text_only(
+                edit["description"] or edit["display_name"], sty, out_path,
+                google_api_key=c.google,
+            )
+        try:
+            return await generate_with_ref_nano_banana(
+                ref_path, edit["description"] or edit["display_name"], sty, out_path,
+                google_api_key=c.google,
+            )
+        except Exception as e:
+            if is_google_safety_error(e) and c.fal:
+                return await generate_with_ref(
+                    ref_path, edit["description"] or edit["display_name"], sty, out_path,
+                    fal_key=c.fal,
+                )
+            raise
 
     async def run_all():
-        client = genai.Client(api_key=c.google)
-        coros = []
-        for i, sty in plan:
-            prompt = build_prompt(edit["description"] or edit["display_name"], sty)
-            coros.append(generate_one(client, prompt, out_dir / f"option_{i}.png"))
-        return await asyncio.gather(*coros, return_exceptions=True)
+        return await asyncio.gather(
+            *[_one(i, sty) for i, sty in plan],
+            return_exceptions=True,
+        )
 
-    with st.spinner(f"Generating {count} candidate{'s' if count != 1 else ''}…"):
+    label = "Nano Banana Pro" + (" with ref" if use_ref else "")
+    with st.spinner(f"Generating {count} candidate{'s' if count != 1 else ''} via {label}…"):
         results = asyncio.run(run_all())
 
     candidates = []
@@ -944,6 +1062,20 @@ def _apply_edit_existing():
         ))
         if char.dir is not None:
             shutil.copy2(src_path, char.dir / char.image)
+
+    # Persist / clear ref image on disk if the user changed it in this session.
+    # Path: characters/<slug>/ref_image.<ext>. Used for redisplay on re-edit.
+    if edit.get("ref_changed") and char.dir is not None:
+        for ext in (".png", ".jpg", ".jpeg", ".webp"):
+            p = char.dir / f"ref_image{ext}"
+            if p.exists():
+                p.unlink()
+        if edit.get("ref_image_bytes"):
+            name = edit.get("ref_image_name") or "ref_image.png"
+            ext = Path(name).suffix.lower()
+            if ext not in (".png", ".jpg", ".jpeg", ".webp"):
+                ext = ".png"
+            (char.dir / f"ref_image{ext}").write_bytes(edit["ref_image_bytes"])
 
     # Save manifest
     char.save()

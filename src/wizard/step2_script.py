@@ -70,19 +70,10 @@ def render():
                 # Top row: avatar + character + reorder/remove
                 row = st.columns([0.7, 3, 0.5, 0.5, 0.5])
                 slug = seg.get("character", "")
-                char = cast.get(slug)
 
-                with row[0]:
-                    if char:
-                        st.image(str(char.image_path), width="stretch")
-                    else:
-                        st.markdown(
-                            '<div style="height:64px; background:#363B47; border-radius:8px; '
-                            'display:flex; align-items:center; justify-content:center; '
-                            'color:#A8AAB1; font-size:0.8rem;">?</div>',
-                            unsafe_allow_html=True,
-                        )
-
+                # Render the selectbox FIRST so we have the up-to-date slug
+                # before drawing the avatar. Otherwise the avatar shows the
+                # previous selection until a second rerun catches up.
                 with row[1]:
                     slugs = list(cast.keys())
                     idx = slugs.index(slug) if slug in slugs else 0
@@ -96,6 +87,19 @@ def render():
                     )
                     if new_slug != slug:
                         seg["character"] = new_slug
+                        slug = new_slug
+                char = cast.get(slug)
+
+                with row[0]:
+                    if char:
+                        st.image(str(char.image_path), width="stretch")
+                    else:
+                        st.markdown(
+                            '<div style="height:64px; background:#363B47; border-radius:8px; '
+                            'display:flex; align-items:center; justify-content:center; '
+                            'color:#A8AAB1; font-size:0.8rem;">?</div>',
+                            unsafe_allow_html=True,
+                        )
 
                 with row[2]:
                     if st.button("↑", key=f"seg_up_{i}", disabled=(i == 0),
@@ -172,17 +176,23 @@ def render():
             st.rerun()
 
     with nav_fwd:
-        valid = (
-            len(segments) > 0
-            and all(seg.get("text", "").strip() for seg in segments)
-            and all(seg.get("character") in cast for seg in segments)
-        )
+        # Don't disable the button — Streamlit's text_area only commits its
+        # value on blur, so a click on a disabled button consumes the blur
+        # event and the user has to click again. Instead, leave the button
+        # active and validate on click. By the time the click is processed,
+        # the textarea has already committed via blur.
         if st.button(
             "Continue to Render  →",
             type="primary",
-            disabled=not valid,
             width="stretch",
             key="step2_continue",
         ):
-            go_to(3)
-            st.rerun()
+            if not segments:
+                st.toast("Add at least one segment first", icon="⚠️")
+            elif any(not seg.get("text", "").strip() for seg in segments):
+                st.toast("Every segment needs Hebrew text", icon="⚠️")
+            elif any(seg.get("character") not in cast for seg in segments):
+                st.toast("One segment points to a character that no longer exists", icon="⚠️")
+            else:
+                go_to(3)
+                st.rerun()

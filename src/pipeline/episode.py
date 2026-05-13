@@ -82,23 +82,32 @@ async def generate_tts(
             r.raise_for_status()
             raw.write_bytes(r.content)
 
+    # Combine atempo (optional) and silence-trim in a single ffmpeg pass.
+    # ElevenLabs eleven_v3 typically prepends 100-400ms of silence which VEED
+    # Fabric renders as closed-mouth idle — feels like a lip-sync delay.
+    # Strip leading + trailing silence below -40dB.
+    filters: list[str] = []
     if tempo != 1.0:
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-i", str(raw),
-            "-filter:a", f"atempo={tempo}",
-            str(output_path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        filters.append(f"atempo={tempo}")
+    filters.append(
+        "silenceremove="
+        "start_periods=1:start_silence=0.05:start_threshold=-40dB:"
+        "stop_periods=1:stop_silence=0.10:stop_threshold=-40dB"
+    )
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-y", "-i", str(raw),
+        "-af", ",".join(filters),
+        str(output_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        tail = stderr.decode(errors="replace").strip().splitlines()[-3:]
+        raise RuntimeError(
+            f"ffmpeg TTS post-process failed (exit {proc.returncode}): "
+            + " | ".join(tail)
         )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            tail = stderr.decode(errors="replace").strip().splitlines()[-3:]
-            raise RuntimeError(
-                f"ffmpeg atempo failed (exit {proc.returncode}): "
-                + " | ".join(tail)
-            )
-    else:
-        shutil.copy2(raw, output_path)
     return output_path
 
 

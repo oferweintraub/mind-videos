@@ -73,6 +73,11 @@ STYLE_PRESETS = {
     "anime": (
         "Rendered in modern Japanese anime style, clean linework, large eyes, cel shading."
     ),
+    "realistic": (
+        "Rendered as a photorealistic studio portrait — natural skin texture, "
+        "soft three-point lighting, shallow depth of field, real-camera look "
+        "(DSLR / 85mm prime), no stylization, no cartoonification."
+    ),
 }
 
 

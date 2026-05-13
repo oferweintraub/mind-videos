@@ -1,15 +1,13 @@
-"""Character image generation — two routes.
+"""Character image generation — Nano Banana Pro primary, FLUX Kontext fallback.
 
-1. Text-only (no reference image) → Nano Banana Pro via Google AI.
-   Cheap, fast, works for any free-text style.
+1. No reference image → Nano Banana Pro (text-only). Cheap, fast.
 
-2. With a reference photo → FLUX Kontext Pro via fal.ai.
-   Specifically designed for "this same character but in a new style/pose".
-   Avoids Google's safety filter on real-photo refs of women + caricature
-   prompts (a known Nano Banana Pro pain point).
+2. With a reference photo → Nano Banana Pro (ref) is tried FIRST.
+   If Google's safety filter blocks the request (most often: real-photo refs
+   of women + caricature prompts), we fall back to FLUX Kontext Pro on fal.ai,
+   which has gentler filtering.
 
-Both routes save the result to a fal-managed temp URL or local disk path,
-then we download and store under characters/_candidates/<slug>/option_N.png.
+Both routes save the result under characters/_candidates/<slug>/option_N.png.
 """
 
 from __future__ import annotations
@@ -61,11 +59,11 @@ async def generate_text_only(
 
 
 # ----------------------------------------------------------------------------
-# Route 2: reference image via FLUX Kontext Pro
+# Route 2a: reference image via Nano Banana Pro (preferred)
 # ----------------------------------------------------------------------------
 
-# How to phrase the prompt when we have a reference image. FLUX Kontext
-# expects an instruction-style prompt referencing the input image.
+# Shared instruction template — used for both Nano Banana with ref and FLUX
+# Kontext. Same wording so the two routes produce comparable output.
 _REF_PROMPT_TEMPLATE = (
     "This same person from the reference image, but transformed into the "
     "following style: {style_clause} "
@@ -74,6 +72,67 @@ _REF_PROMPT_TEMPLATE = (
     "no hands near the face, mouth fully visible and clearly defined, "
     "eyes well-lit, plain background, no text or watermarks."
 )
+
+
+def is_google_safety_error(exc: BaseException) -> bool:
+    """Return True if a Google AI exception was triggered by the safety filter
+    or a content-moderation block — the case where FLUX Kontext is the
+    appropriate fallback."""
+    msg = str(exc).upper()
+    return "SAFETY" in msg or "BLOCKED" in msg or "PROHIBITED_CONTENT" in msg
+
+
+async def generate_with_ref_nano_banana(
+    ref_image_path: Path,
+    description: str,
+    style: str,
+    output_path: Path,
+    *,
+    google_api_key: str,
+) -> Path:
+    """Generate one candidate using Nano Banana Pro with a reference image.
+
+    Raises on safety-filter blocks; caller should fall back to FLUX Kontext.
+    """
+    if not google_api_key:
+        raise RuntimeError("Nano Banana Pro requires google_api_key")
+    if not ref_image_path.exists():
+        raise FileNotFoundError(f"Reference image missing: {ref_image_path}")
+
+    log.info("generate_with_ref_nano_banana style=%s ref=%s",
+             style, ref_image_path.name)
+    client = genai.Client(api_key=google_api_key)
+
+    ref_bytes = ref_image_path.read_bytes()
+    mime = "image/png" if ref_image_path.suffix.lower() == ".png" else "image/jpeg"
+    prompt = _REF_PROMPT_TEMPLATE.format(style_clause=_style_clause(style))
+    if description:
+        prompt = f"{prompt} Character description for additional context: {description}"
+
+    response = client.models.generate_content(
+        model="nano-banana-pro-preview",
+        contents=[
+            types.Part.from_bytes(data=ref_bytes, mime_type=mime),
+            prompt,
+        ],
+        config=types.GenerateContentConfig(response_modalities=["image", "text"]),
+    )
+    for part in response.candidates[0].content.parts:
+        if hasattr(part, "inline_data") and part.inline_data:
+            output_path.write_bytes(part.inline_data.data)
+            log.info("generate_with_ref_nano_banana OK style=%s bytes=%d",
+                     style, len(part.inline_data.data))
+            return output_path
+    raise RuntimeError(
+        f"Nano Banana Pro returned no image for {output_path.name} "
+        f"(possibly safety-blocked, raw response: {response})"
+    )
+
+
+# ----------------------------------------------------------------------------
+# Route 2b: reference image via FLUX Kontext Pro (fallback when Nano Banana
+#           safety-blocks the request)
+# ----------------------------------------------------------------------------
 
 
 def _style_clause(style: str) -> str:

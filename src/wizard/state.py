@@ -240,12 +240,30 @@ def add_character(char: Character):
     auto_save()
 
 
+def _clear_segment_widget_state():
+    """Drop all seg_text_*/seg_char_* keys from session_state.
+
+    Streamlit text_area and selectbox cache their values under their `key=`.
+    After we mutate the segments list (remove / reorder), the cached values
+    for old indices stay around and override the new segments' values on the
+    next render — making it look like other characters' segments were
+    "deleted" or had their text swapped. Wipe the keys so widgets re-read
+    from segments[i] on the next render.
+    """
+    s = st.session_state
+    stale = [k for k in list(s.keys())
+             if isinstance(k, str) and (k.startswith("seg_text_") or k.startswith("seg_char_"))]
+    for k in stale:
+        del s[k]
+
+
 def remove_character(slug: str):
     """Remove from session cast. Also remove any segments using this character."""
     st.session_state.cast.pop(slug, None)
     st.session_state.segments = [
         s for s in st.session_state.segments if s.get("character") != slug
     ]
+    _clear_segment_widget_state()
     auto_save()
 
 
@@ -257,6 +275,7 @@ def add_segment(character: str, text: str = ""):
 def remove_segment(idx: int):
     if 0 <= idx < len(st.session_state.segments):
         st.session_state.segments.pop(idx)
+        _clear_segment_widget_state()
         auto_save()
 
 
@@ -266,6 +285,7 @@ def move_segment(idx: int, delta: int):
     j = idx + delta
     if 0 <= j < len(segs):
         segs[idx], segs[j] = segs[j], segs[idx]
+        _clear_segment_widget_state()
         auto_save()
 
 
