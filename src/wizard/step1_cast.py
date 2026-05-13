@@ -399,20 +399,22 @@ def _render_edit():
                 unsafe_allow_html=True,
             )
 
-    # 3. Generate button
-    can_generate = bool(draft["description"].strip()) and (
-        not draft["compare_styles"] and bool(draft["single_style"]) or
-        draft["compare_styles"] and 2 <= len(draft["compare_pick"]) <= 3
-    )
-
+    # 3. Generate button — never disabled so the click registers on the first
+    # try (avoids the text_input blur race). Validates inside the handler.
     if st.button(
         "▶  Generate candidates",
         type="primary",
-        disabled=not can_generate,
         key="draft_generate",
     ):
-        _generate_candidates_for_draft()
-        st.rerun()
+        if not draft["description"].strip():
+            st.warning("Describe the character first.")
+        elif draft["compare_styles"] and not (2 <= len(draft["compare_pick"]) <= 3):
+            st.warning("Pick 2 or 3 styles to compare.")
+        elif not draft["compare_styles"] and not draft["single_style"]:
+            st.warning("Pick a style.")
+        else:
+            _generate_candidates_for_draft()
+            st.rerun()
 
     # 4. Candidate picker (if generated)
     if draft["candidates"]:
@@ -458,15 +460,20 @@ def _generate_candidates_for_draft():
 
     # Nano Banana Pro is the primary route for both text-only and ref-image
     # generation. fal.ai is only needed as a safety-block fallback when a ref
-    # image is in play.
+    # image is in play. Show a persistent error (not a toast) since a missing
+    # key is the most common reason "Generate" appears to do nothing.
     if not c.google:
-        st.toast("Add Google AI key in the Settings panel first", icon="⚠️")
+        st.error(
+            "**Add your Google AI key first.**\n\n"
+            "Open the **Settings** panel on the left and paste a Google AI Studio "
+            "key into the *Google AI (images)* field. Get one (free tier OK) at "
+            "https://aistudio.google.com/app/apikey."
+        )
         return
     if use_ref and not c.fal:
-        st.toast(
-            "Heads up: with a reference image we may need fal.ai as a safety-filter fallback. "
-            "Trying Nano Banana Pro alone for now.",
-            icon="ℹ️",
+        st.info(
+            "Heads up: with a reference image we may need fal.ai as a safety-filter "
+            "fallback. Trying Nano Banana Pro alone for now."
         )
 
     # Generate a session-local slug for the candidates dir
