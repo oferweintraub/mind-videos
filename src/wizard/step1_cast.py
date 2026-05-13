@@ -458,11 +458,12 @@ def _generate_candidates_for_draft():
     c = creds.read()
     use_ref = bool(draft.get("ref_image_bytes"))
 
-    # Nano Banana Pro is the primary route for both text-only and ref-image
-    # generation. fal.ai is only needed as a safety-block fallback when a ref
-    # image is in play. Show a persistent error (not a toast) since a missing
-    # key is the most common reason "Generate" appears to do nothing.
-    if not c.google:
+    # Routing rules:
+    # - Text-only: Google AI key is required (Nano Banana Pro is the only path).
+    # - With a ref image: prefer Nano Banana; fall back to FLUX Kontext on
+    #   ANY Nano Banana failure if fal.ai is configured. If only fal.ai is
+    #   set (no Google key), go straight to FLUX Kontext.
+    if not use_ref and not c.google:
         st.error(
             "**Add your Google AI key first.**\n\n"
             "Open the **Settings** panel on the left and paste a Google AI Studio "
@@ -470,10 +471,17 @@ def _generate_candidates_for_draft():
             "https://aistudio.google.com/app/apikey."
         )
         return
+    if use_ref and not c.google and not c.fal:
+        st.error(
+            "**Add an API key first.**\n\n"
+            "With a reference image we need either Google AI (Nano Banana Pro) or "
+            "fal.ai (FLUX Kontext). Paste one into the **Settings** panel."
+        )
+        return
     if use_ref and not c.fal:
         st.info(
-            "Heads up: with a reference image we may need fal.ai as a safety-filter "
-            "fallback. Trying Nano Banana Pro alone for now."
+            "Heads up: with a reference image we may need fal.ai as a fallback if "
+            "Nano Banana Pro fails. Trying it alone for now."
         )
 
     # Generate a session-local slug for the candidates dir
@@ -501,8 +509,9 @@ def _generate_candidates_for_draft():
 
     from src.pipeline.character_gen import (
         generate_text_only, generate_with_ref, generate_with_ref_nano_banana,
-        is_google_safety_error,
     )
+    import logging as _logging
+    _log = _logging.getLogger("mind-video")
 
     async def _one(i: int, style: str) -> Path:
         out_path = out_dir / f"option_{i}.png"
@@ -512,14 +521,25 @@ def _generate_candidates_for_draft():
                 draft["description"], style, out_path,
                 google_api_key=c.google,
             )
-        # Try Nano Banana with ref first; fall back to FLUX on safety blocks.
+        # No Google key? Go straight to FLUX Kontext.
+        if not c.google:
+            return await generate_with_ref(
+                ref_path, draft["description"], style, out_path,
+                fal_key=c.fal,
+            )
+        # Try Nano Banana with ref first; fall back to FLUX Kontext on ANY
+        # failure (safety block, quota, transient API error) if fal.ai is set.
         try:
             return await generate_with_ref_nano_banana(
                 ref_path, draft["description"], style, out_path,
                 google_api_key=c.google,
             )
         except Exception as e:
-            if is_google_safety_error(e) and c.fal:
+            if c.fal:
+                _log.warning(
+                    "Nano Banana Pro failed (%s: %s) — falling back to FLUX Kontext",
+                    type(e).__name__, str(e)[:200],
+                )
                 return await generate_with_ref(
                     ref_path, draft["description"], style, out_path,
                     fal_key=c.fal,
@@ -532,7 +552,12 @@ def _generate_candidates_for_draft():
             return_exceptions=True,
         )
 
-    label_route = "Nano Banana Pro" + (" + FLUX fallback" if use_ref and c.fal else "")
+    if use_ref and not c.google and c.fal:
+        label_route = "FLUX Kontext (no Google key)"
+    elif use_ref and c.fal:
+        label_route = "Nano Banana Pro + FLUX fallback"
+    else:
+        label_route = "Nano Banana Pro"
     with st.spinner(f"Generating {len(plan)} candidate{'s' if len(plan) != 1 else ''} via {label_route}…"):
         results = asyncio.run(run_all())
 
@@ -965,16 +990,23 @@ def _run_regen(edit: dict, count: int):
     reference image is attached. Otherwise text-only Nano Banana Pro.
     """
     c = creds.read()
-    if not c.google:
-        st.toast("Add Google AI key in the Settings panel first", icon="⚠️")
+    use_ref = bool(edit.get("ref_image_bytes"))
+
+    # Text-only regen needs Google. Ref-image regen accepts either Google or fal.ai.
+    if not use_ref and not c.google:
+        st.error(
+            "**Add your Google AI key first.**\n\n"
+            "Open Settings and paste a Google AI Studio key."
+        )
+        return
+    if use_ref and not c.google and not c.fal:
+        st.error("**Add either a Google AI or fal.ai key in Settings first.**")
         return
 
     out_dir = CANDIDATES_DIR / f"regen_{edit['slug']}"
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    use_ref = bool(edit.get("ref_image_bytes"))
     ref_path: Optional[Path] = None
     if use_ref:
         ref_path = out_dir / "_ref.png"
@@ -985,26 +1017,35 @@ def _run_regen(edit: dict, count: int):
 
     from src.pipeline.character_gen import (
         generate_text_only, generate_with_ref, generate_with_ref_nano_banana,
-        is_google_safety_error,
     )
+    import logging as _logging
+    _log = _logging.getLogger("mind-video")
 
     async def _one(i: int, sty: str) -> Path:
         out_path = out_dir / f"option_{i}.png"
+        desc = edit["description"] or edit["display_name"]
         if not use_ref:
             return await generate_text_only(
-                edit["description"] or edit["display_name"], sty, out_path,
-                google_api_key=c.google,
+                desc, sty, out_path, google_api_key=c.google,
             )
+        # No Google key? Straight to FLUX Kontext.
+        if not c.google:
+            return await generate_with_ref(
+                ref_path, desc, sty, out_path, fal_key=c.fal,
+            )
+        # Nano Banana first; fall back to FLUX Kontext on ANY failure.
         try:
             return await generate_with_ref_nano_banana(
-                ref_path, edit["description"] or edit["display_name"], sty, out_path,
-                google_api_key=c.google,
+                ref_path, desc, sty, out_path, google_api_key=c.google,
             )
         except Exception as e:
-            if is_google_safety_error(e) and c.fal:
+            if c.fal:
+                _log.warning(
+                    "Nano Banana Pro failed (%s: %s) — falling back to FLUX Kontext",
+                    type(e).__name__, str(e)[:200],
+                )
                 return await generate_with_ref(
-                    ref_path, edit["description"] or edit["display_name"], sty, out_path,
-                    fal_key=c.fal,
+                    ref_path, desc, sty, out_path, fal_key=c.fal,
                 )
             raise
 
