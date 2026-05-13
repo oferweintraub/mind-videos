@@ -93,9 +93,16 @@ def _gate():
         '<p class="wz-quiet">Enter the password your collaborator gave you.</p>',
         unsafe_allow_html=True,
     )
-    pw = st.text_input("Password", type="password", label_visibility="collapsed")
-    if st.button("Enter", type="primary", disabled=not pw, width="stretch"):
-        if pw == expected:
+    # Wrap in a form so pressing Enter in the password field submits, and so
+    # the click on "Enter" works on the first try (no text_input blur race
+    # from leaving the button disabled).
+    with st.form("login_form", clear_on_submit=False):
+        pw = st.text_input("Password", type="password", label_visibility="collapsed")
+        submitted = st.form_submit_button("Enter", type="primary", width="stretch")
+    if submitted:
+        if not pw:
+            st.warning("Enter the password first")
+        elif pw == expected:
             st.session_state.authed = True
             st.rerun()
         else:
