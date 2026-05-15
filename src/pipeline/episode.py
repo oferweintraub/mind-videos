@@ -85,15 +85,18 @@ async def generate_tts(
     # Combine atempo (optional) and silence-trim in a single ffmpeg pass.
     # ElevenLabs eleven_v3 typically prepends 100-400ms of silence which VEED
     # Fabric renders as closed-mouth idle — feels like a lip-sync delay.
-    # Strip leading + trailing silence below -40dB.
+    # We only trim true leading + trailing silence — never mid-audio.
+    #
+    # NOTE: a naive `silenceremove=stop_periods=1:stop_silence=0.10` chops
+    # everything after the FIRST 0.10s pause anywhere — Hebrew text with
+    # commas/ellipses ends up truncated to under a second. The canonical
+    # "trim ends only" pattern is: trim leading, reverse audio, trim leading
+    # again (which is the original trailing), reverse back.
     filters: list[str] = []
     if tempo != 1.0:
         filters.append(f"atempo={tempo}")
-    filters.append(
-        "silenceremove="
-        "start_periods=1:start_silence=0.05:start_threshold=-40dB:"
-        "stop_periods=1:stop_silence=0.10:stop_threshold=-40dB"
-    )
+    _edge_trim = "silenceremove=start_periods=1:start_silence=0.05:start_threshold=-40dB"
+    filters.extend([_edge_trim, "areverse", _edge_trim, "areverse"])
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg", "-y", "-i", str(raw),
         "-af", ",".join(filters),
