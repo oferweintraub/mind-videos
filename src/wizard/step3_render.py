@@ -309,8 +309,15 @@ def _render_running():
 # --- Done -------------------------------------------------------------------
 
 def _render_done():
-    result = st.session_state.result
-    title = result["title"]
+    result = st.session_state.result or {}
+    # Older saved rows may not have "title" in the result blob — fall back to
+    # session_state.title (or "Untitled") so the Done page renders cleanly
+    # instead of crashing on a missing key.
+    title = (
+        result.get("title")
+        or (st.session_state.get("title") or "").strip()
+        or "Untitled"
+    )
 
     # Reconstruct the local path from the slug (cloud-portable) — older rows
     # stored an absolute "path" that's only valid on the rendering machine.
