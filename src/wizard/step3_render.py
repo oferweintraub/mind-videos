@@ -116,7 +116,17 @@ def _render_running():
     segments = st.session_state.segments
     title = st.session_state.title.strip() or "Untitled"
     slug = safe_episode_slug(title)
-    episode_dir = EPISODES_DIR / slug
+    # Namespace the cache dir by project_id so a different project on the same
+    # Streamlit Cloud worker can't poison this render via skip-if-exists, and
+    # so Hebrew-only titles (which slugify to "my_episode") don't collide.
+    pid = st.session_state.get("project_id") or "local"
+    episode_dir = EPISODES_DIR / pid / slug
+    # Always rebuild from scratch — segment text / character image / voice may
+    # have changed since the last render in this project. Cheaper than tracking
+    # content hashes per file, and correctness > skip-if-exists savings here.
+    if episode_dir.exists():
+        import shutil as _sh
+        _sh.rmtree(episode_dir, ignore_errors=True)
 
     st.markdown(f'# Generating *{title}*…')
     st.markdown(
@@ -321,8 +331,11 @@ def _render_done():
 
     # Reconstruct the local path from the slug (cloud-portable) — older rows
     # stored an absolute "path" that's only valid on the rendering machine.
+    # Same project_id namespacing as _render_running to avoid cross-project
+    # cache collisions on Streamlit Cloud's shared filesystem.
     slug = result.get("slug") or safe_episode_slug(title)
-    final_path = EPISODES_DIR / slug / "final.mp4"
+    pid_done = st.session_state.get("project_id") or "local"
+    final_path = EPISODES_DIR / pid_done / slug / "final.mp4"
 
     # Cross-session resume: when a recipient opens the share-link, the local
     # disk doesn't have the rendered file. Pull it from Storage.

@@ -340,7 +340,8 @@ def invalidate_episode_for_character(slug: str) -> int:
     Other episodes that happen to use the same character slug aren't touched.
     """
     title = st.session_state.get("title", "") or "Untitled"
-    episode_dir = EPISODES_DIR / safe_episode_slug(title)
+    pid = st.session_state.get("project_id") or "local"
+    episode_dir = EPISODES_DIR / pid / safe_episode_slug(title)
     if not episode_dir.exists():
         return 0
 
