@@ -350,8 +350,9 @@ def _render_done():
             st.error(f"Output missing: {final_path}")
 
     with side:
-        elapsed = result["elapsed"]
-        cost = result["cost"]
+        # Older saved rows may not carry elapsed/cost — default rather than crash.
+        elapsed = float(result.get("elapsed") or 0.0)
+        cost = float(result.get("cost") or 0.0)
         st.markdown(
             f'<div class="wz-card">'
             f'<p class="wz-tiny" style="margin:0;">RENDERED IN</p>'
@@ -367,7 +368,7 @@ def _render_done():
                 st.download_button(
                     "⬇  Download MP4",
                     data=f.read(),
-                    file_name=f"{result['slug']}.mp4",
+                    file_name=f"{result.get('slug') or slug}.mp4",
                     mime="video/mp4",
                     type="primary",
                     width="stretch",
