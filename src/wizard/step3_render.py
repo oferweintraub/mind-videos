@@ -382,7 +382,7 @@ def _render_done():
         st.download_button(
             "📦  Export project (.zip)",
             data=zip_bytes,
-            file_name=f"{result['slug']}.zip",
+            file_name=f"{result.get('slug') or slug}.zip",
             mime="application/zip",
             width="stretch",
             key="r_download_zip",
