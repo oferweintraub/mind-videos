@@ -453,127 +453,23 @@ def _hydrate_from_url():
 _hydrate_from_url()
 _settings_drawer()
 
-# ---------------------------------------------------------------------------
-# Share dialog — opens from a prominent header button when a project exists.
-# Hides the "URL is buried in the sidebar" friction; gives the keys-toggle
-# its own visual weight so people don't miss it.
-# ---------------------------------------------------------------------------
-
-@st.dialog("🔗 Share this project", width="large")
-def _share_dialog():
-    pid = st.session_state.get("project_id")
-    if not pid:
-        st.info(
-            "Add a character or load the demo first — that creates the project "
-            "in the cloud so we have a URL to share."
-        )
-        return
-
-    base = "https://mind-video-play.streamlit.app"
-    share_url = f"{base}/?p={pid}"
-
-    st.markdown("**Send this URL to anyone you want to collaborate with:**")
-    st.code(share_url, language=None)
+# Header — Mind Video title. Sharing UI lives in the Settings sidebar
+# (SHARE section) — no header button needed.
+st.markdown(
+    f'<h1 style="margin:0; font-size:1.4rem;">'
+    f'🎬 <span style="color:{PALETTE["accent"]};">Mind</span> Video'
+    f'</h1>',
+    unsafe_allow_html=True,
+)
+if not st.session_state.get("project_id"):
     st.markdown(
-        '<p class="wz-tiny">'
-        "They'll land on the project's current state. Browser bookmarks work "
-        "across full sessions. <em>Don't share with strangers — the URL is the "
-        "only access token.</em>"
-        "</p>",
+        '<p class="wz-tiny" style="margin:0 0 0.6rem 0;">'
+        'Hebrew animated videos · '
+        '<span style="color:#E8B14F;">add your API keys ←</span> '
+        'in the Settings panel'
+        '</p>',
         unsafe_allow_html=True,
     )
-
-    st.divider()
-
-    # Key handoff — make this VERY visible since it's the user's "PIs intact"
-    # ask. Default OFF; opt-in only.
-    current_share_keys = bool(st.session_state.get("share_keys", False))
-    st.markdown(
-        f'<div style="background:{("#3a2c1c" if current_share_keys else "#21242c")}; '
-        f'border:1px solid {("#E8B14F" if current_share_keys else "#363B47")}; '
-        f'border-radius:8px; padding:0.9rem 1rem; margin-bottom:0.6rem;">'
-        f'<strong style="font-size:1rem;">'
-        f'{"🔑 API keys are INCLUDED in this link" if current_share_keys else "🔒 API keys are NOT in this link"}'
-        f'</strong><br>'
-        f'<span class="wz-quiet" style="font-size:0.85rem;">'
-        f'{("Recipients spend YOUR fal.ai / ElevenLabs balance. Only enable for people you trust." if current_share_keys else "Recipients will need to paste their own keys. Toggle on if you want them to use yours.")}'
-        f'</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    new_share_keys = st.toggle(
-        "Include my API keys in the link",
-        value=current_share_keys,
-        key="share_dialog_keys_toggle",
-        help=(
-            "OFF (default + safe): the recipient sees a Settings panel and "
-            "must paste their own keys to render. "
-            "ON: the keys are stored on the project row, and anyone who opens "
-            "the link can spend YOUR fal.ai + ElevenLabs balance."
-        ),
-    )
-    if new_share_keys != current_share_keys:
-        st.session_state.share_keys = new_share_keys
-        api_keys: dict = {}
-        if new_share_keys:
-            api_keys = {
-                "fal": st.session_state.get("_key_FAL_KEY", "") or "",
-                "elevenlabs": st.session_state.get("_key_ELEVENLABS_API_KEY", "") or "",
-                "google": st.session_state.get("_key_GOOGLE_API_KEY", "") or "",
-            }
-            # Warn if the toggle is on but keys are empty — recipient gets nothing.
-            empty = [k for k, v in api_keys.items() if not v]
-            if empty:
-                st.warning(
-                    f"You toggled ON but these keys are empty in your session: "
-                    f"**{', '.join(empty)}**. Open the Settings panel and paste them, "
-                    "then re-toggle to push them to the share link."
-                )
-        try:
-            persistence.save_state(
-                pid, share_keys=new_share_keys, api_keys=api_keys,
-            )
-            st.toast(
-                "Keys added to share link" if new_share_keys
-                else "Keys removed from share link",
-                icon="🔑" if new_share_keys else "✅",
-            )
-            st.rerun()
-        except Exception as e:
-            st.error(f"Couldn't update share settings: {type(e).__name__}: {e}")
-
-
-# Header — Mind Video title + prominent Share button (when project exists)
-has_project = bool(st.session_state.get("project_id"))
-if has_project:
-    header_left, header_right = st.columns([4, 1])
-else:
-    header_left, header_right = st.columns([5, 1])
-
-with header_left:
-    st.markdown(
-        f'<h1 style="margin:0; font-size:1.4rem;">'
-        f'🎬 <span style="color:{PALETTE["accent"]};">Mind</span> Video'
-        f'</h1>',
-        unsafe_allow_html=True,
-    )
-with header_right:
-    if has_project:
-        # Show whether keys are bundled at a glance
-        share_state_icon = "🔑" if st.session_state.get("share_keys") else "🔗"
-        if st.button(f"{share_state_icon}  Share project", key="hdr_share_btn",
-                     width="stretch"):
-            _share_dialog()
-    else:
-        st.markdown(
-            '<p class="wz-tiny" style="text-align:right; margin:0;">'
-            'Hebrew animated videos · '
-            '<span style="color:#E8B14F;">add your API keys ←</span> '
-            'in the Settings panel'
-            '</p>',
-            unsafe_allow_html=True,
-        )
 
 # Step indicator
 step_indicator(st.session_state.step, ["Cast", "Script", "Render"])
