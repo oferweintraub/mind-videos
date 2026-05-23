@@ -33,6 +33,7 @@ load_dotenv(ROOT / ".env")
 from src.character import load as load_character, slugs as character_slugs
 from src.script_format import parse_file, validate_against_characters
 from src.pipeline.episode import generate_tts, lipsync, concat
+from src.pipeline.cache_keys import audio_cache_key, video_cache_key
 
 
 def _audio_duration(path: Path) -> float:
@@ -97,13 +98,22 @@ async def run(script_path: Path, episode_dir: Path):
             char_cache[seg.character] = load_character(seg.character)
         char = char_cache[seg.character]
 
-        seg_id = f"seg{i:02d}_{seg.character}"
-        audio_path = audio_dir / f"{seg_id}.mp3"
-        video_path = video_dir / f"{seg_id}.mp4"
+        # Content-hash cache so editing one segment doesn't bust the others.
+        # Same text + same voice settings → same file → instant skip-if-exists.
+        audio_key = audio_cache_key(
+            text=seg.text,
+            voice_id=char.voice.voice_id,
+            tempo=char.voice.tempo,
+            stability=char.voice.stability,
+            similarity=char.voice.similarity,
+            style=char.voice.style,
+        )
+        audio_path = audio_dir / f"{audio_key}.mp3"
 
         print(f"\n>> Segment #{i+1}: @{seg.character} ({len(seg.text)} chars)")
 
         t0 = time.time()
+        cached = audio_path.exists()
         await generate_tts(
             text=seg.text,
             voice_id=char.voice.voice_id,
@@ -116,30 +126,42 @@ async def run(script_path: Path, episode_dir: Path):
         )
         gen_secs = time.time() - t0
         audio_secs = _audio_duration(audio_path)
+        note = "cached" if cached else f"generated in {gen_secs:.1f}s"
         if audio_secs:
             print(f"   audio:   {audio_path.relative_to(ROOT)}  "
-                  f"[{audio_secs:.1f}s of speech, generated in {gen_secs:.1f}s]")
+                  f"[{audio_secs:.1f}s of speech, {note}]")
         else:
-            print(f"   audio:   {audio_path.relative_to(ROOT)}  "
-                  f"[generated in {gen_secs:.1f}s]")
+            print(f"   audio:   {audio_path.relative_to(ROOT)}  [{note}]")
 
-        t1 = time.time()
-        last_print = [0.0]
-        eta = max(audio_secs * 4, 30.0) if audio_secs else 60.0
-        print(f"   lipsync: starting (typical wall-clock for {audio_secs:.1f}s of audio: ~{eta:.0f}s)")
-        def cb(elapsed, msg, _last=last_print):
-            if elapsed - _last[0] >= 5.0:
-                print(f"   lipsync: waited {elapsed:5.0f}s — fal.ai status: {msg}")
-                _last[0] = elapsed
-        await lipsync(
-            char.image_path, audio_path, video_path,
-            fal_key=fal_key, progress_cb=cb,
-        )
-        print(f"   video:   {video_path.relative_to(ROOT)}  [rendered in {time.time()-t1:.0f}s]")
+        # video key depends on the audio file's bytes + the image bytes — so
+        # any change to either invalidates the lip-sync cache automatically.
+        video_key = video_cache_key(audio_path, char.image_path)
+        video_path = video_dir / f"{video_key}.mp4"
+
+        if video_path.exists():
+            print(f"   lipsync: cached → {video_path.relative_to(ROOT)}")
+        else:
+            t1 = time.time()
+            last_print = [0.0]
+            eta = max(audio_secs * 4, 30.0) if audio_secs else 60.0
+            print(f"   lipsync: starting (typical wall-clock for {audio_secs:.1f}s of audio: ~{eta:.0f}s)")
+            def cb(elapsed, msg, _last=last_print):
+                if elapsed - _last[0] >= 5.0:
+                    print(f"   lipsync: waited {elapsed:5.0f}s — fal.ai status: {msg}")
+                    _last[0] = elapsed
+            await lipsync(
+                char.image_path, audio_path, video_path,
+                fal_key=fal_key, progress_cb=cb,
+            )
+            print(f"   video:   {video_path.relative_to(ROOT)}  [rendered in {time.time()-t1:.0f}s]")
 
         video_paths.append(video_path)
 
     final_path = episode_dir / "final.mp4"
+    # Always rebuild final.mp4 — segment order / set may have changed since
+    # the last run, and concat is cheap (~1s for stream copy).
+    if final_path.exists():
+        final_path.unlink()
     print(f"\n>> Concatenating {len(video_paths)} clips -> {final_path.relative_to(ROOT)}")
     await concat(video_paths, final_path)
     print(f"\n>> DONE: {final_path}")

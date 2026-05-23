@@ -1,9 +1,15 @@
 """Step 3 — Render + result.
 
-Three sub-states (st.session_state.render_phase):
+Sub-phases (st.session_state.render_phase):
 - "preflight": summary card + Generate button
-- "running":   live progress per segment
+- "audio":     generate TTS for every segment (fast, no lip-sync $$)
+- "review":    per-segment audio players + 🔄 Regenerate buttons
+- "lipsync":   live progress while VEED renders each segment + concat
 - "done":      inline player + download + buttons
+
+Audio + video files are cached by content hash (see pipeline/cache_keys.py)
+so changing one segment doesn't bust the others — fixes the "fix one
+pronunciation, lose another" complaint with eleven_v3's non-determinism.
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ from pathlib import Path
 import streamlit as st
 
 from src.pipeline.episode import generate_tts, lipsync, concat
+from src.pipeline.cache_keys import audio_cache_key, video_cache_key
 from src.wizard.state import (
     estimate_episode, safe_episode_slug, export_project_zip, go_to,
     auto_save,
@@ -33,12 +40,48 @@ def render():
         st.session_state.render_phase = "preflight"
 
     phase = st.session_state.render_phase
-    if phase == "running":
-        _render_running()
+    if phase == "audio":
+        _render_audio_phase()
+    elif phase == "review":
+        _render_review_phase()
+    elif phase == "lipsync":
+        _render_lipsync_phase()
     elif phase == "done":
         _render_done()
     else:
         _render_preflight()
+
+
+# --- Path helpers ------------------------------------------------------------
+
+def _episode_dir() -> Path:
+    """Per-project episode dir. Namespacing by project_id prevents cross-project
+    cache poisoning on Streamlit Cloud's shared filesystem."""
+    title = (st.session_state.get("title") or "").strip() or "Untitled"
+    slug = safe_episode_slug(title)
+    pid = st.session_state.get("project_id") or "local"
+    return EPISODES_DIR / pid / slug
+
+
+def _audio_path_for(i: int) -> Path:
+    """Content-hash-derived audio path for segment i. Same inputs → same path
+    → cache hit. To force a fresh take of identical text, bump the segment's
+    regen_counter (via the Regenerate button on the review page)."""
+    segments = st.session_state.segments
+    cast = st.session_state.cast
+    seg = segments[i]
+    char = cast[seg["character"]]
+    counters = st.session_state.get("seg_regen_counter") or {}
+    key = audio_cache_key(
+        text=seg["text"],
+        voice_id=char.voice.voice_id,
+        tempo=char.voice.tempo,
+        stability=char.voice.stability,
+        similarity=char.voice.similarity,
+        style=char.voice.style,
+        regen_counter=int(counters.get(str(i), 0)),
+    )
+    return _episode_dir() / "audio" / f"{key}.mp3"
 
 
 # --- Preflight ---------------------------------------------------------------
@@ -50,12 +93,11 @@ def _render_preflight():
 
     st.markdown("# Ready to render?")
     st.markdown(
-        '<p class="wz-quiet">This takes about 5–10 minutes for a typical 30-second video. '
-        'You can leave this tab open and check back.</p>',
+        '<p class="wz-quiet">First we generate the audio so you can preview each '
+        'clip — then you approve before we spend money on lip-sync.</p>',
         unsafe_allow_html=True,
     )
 
-    # Summary card
     est = estimate_episode(segments)
     st.markdown(
         f'<div class="wz-card">'
@@ -64,13 +106,12 @@ def _render_preflight():
         f'{len(cast)} character{"s" if len(cast) != 1 else ""} · '
         f'{est["segments"]} segment{"s" if est["segments"] != 1 else ""} · '
         f'{est["audio_secs"]:.0f}s of audio · '
-        f'<strong style="color:{PALETTE["accent"]};">~${est["cost_usd"]:.2f}</strong>'
+        f'<strong style="color:{PALETTE["accent"]};">~${est["cost_usd"]:.2f}</strong> at lip-sync'
         f'</p>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-    # Cast strip
     cols = st.columns(max(1, len(cast)))
     for col, char in zip(cols, cast.values()):
         with col:
@@ -79,7 +120,6 @@ def _render_preflight():
 
     st.markdown('<div style="margin-top:1.5rem;"></div>', unsafe_allow_html=True)
 
-    # Preflight: keys must be present in this user's session
     c = creds.read()
     missing = c.missing("fal", "elevenlabs")
     if missing:
@@ -87,7 +127,6 @@ def _render_preflight():
             f"Add **{', '.join(missing)}** key(s) in the Settings panel before rendering."
         )
 
-    # Footer nav
     st.markdown('<div class="wz-footer"></div>', unsafe_allow_html=True)
     nav_back, _, nav_fwd = st.columns([1, 1, 1.5])
 
@@ -98,44 +137,30 @@ def _render_preflight():
 
     with nav_fwd:
         if st.button(
-            f"▶  Generate video  ·  ~${est['cost_usd']:.2f}",
+            "▶  Generate audio (preview first)",
             type="primary",
             disabled=bool(missing) or len(segments) == 0,
             width="stretch",
             key="r_generate",
         ):
-            st.session_state.render_phase = "running"
-            st.session_state.render_started_at = time.time()
+            st.session_state.render_phase = "audio"
             st.rerun()
 
 
-# --- Running -----------------------------------------------------------------
+# --- Audio phase -------------------------------------------------------------
 
-def _render_running():
+def _render_audio_phase():
     cast = st.session_state.cast
     segments = st.session_state.segments
     title = st.session_state.title.strip() or "Untitled"
-    slug = safe_episode_slug(title)
-    # Namespace the cache dir by project_id so a different project on the same
-    # Streamlit Cloud worker can't poison this render via skip-if-exists, and
-    # so Hebrew-only titles (which slugify to "my_episode") don't collide.
-    pid = st.session_state.get("project_id") or "local"
-    episode_dir = EPISODES_DIR / pid / slug
-    # Always rebuild from scratch — segment text / character image / voice may
-    # have changed since the last render in this project. Cheaper than tracking
-    # content hashes per file, and correctness > skip-if-exists savings here.
-    if episode_dir.exists():
-        import shutil as _sh
-        _sh.rmtree(episode_dir, ignore_errors=True)
+    episode_dir = _episode_dir()
 
-    st.markdown(f'# Generating *{title}*…')
+    st.markdown(f'# Generating audio for *{title}*…')
     st.markdown(
-        '<p class="wz-quiet">Don\'t refresh the page. You can switch to another tab — '
-        'we\'ll keep working in the background.</p>',
+        '<p class="wz-quiet">Fast part — you\'ll preview each clip in a moment.</p>',
         unsafe_allow_html=True,
     )
 
-    # Per-segment placeholders
     seg_placeholders = []
     for i, seg in enumerate(segments):
         char = cast[seg["character"]]
@@ -153,65 +178,28 @@ def _render_running():
             with row[2]:
                 seg_placeholders.append(st.empty())
 
-    # Concat placeholder
-    with st.container(border=True):
-        cols = st.columns([4, 1.5])
-        cols[0].markdown("**Stitching all segments together**")
-        concat_placeholder = cols[1].empty()
-
-    # Drive the async pipeline using a thread + asyncio queue. We periodically
-    # snapshot the status dict and rerun until it's done. To keep this
-    # implementation simple and Streamlit-idiomatic, we run the pipeline
-    # synchronously here (Streamlit's exec model means each rerun blocks
-    # this entire function — but that's fine because long-running awaits
-    # are inside lipsync()). Streamlit's connection layer keeps the UI alive.
-
-    # We use a shared dict that the cb writes to. Initial paint:
     for i in range(len(segments)):
         seg_placeholders[i].markdown(pill("queued", "queued"), unsafe_allow_html=True)
-    concat_placeholder.markdown(pill("queued", "queued"), unsafe_allow_html=True)
 
-    # Inline progress wrapper: we render once, then ask asyncio to run the
-    # pipeline. Per-step UI updates happen via a callback that writes to a
-    # placeholder. The placeholders are captured above so the callback can
-    # reach them via closure.
+    c = creds.require("elevenlabs")
+    audio_dir = episode_dir / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
 
-    status_holder: dict = {}
-
-    def render_status(i: int, status: str, msg: str = "", elapsed: float = 0):
-        if status == "audio":
-            label = f"🎙 Speech…"
-            seg_placeholders[i].markdown(pill(label, "running"), unsafe_allow_html=True)
-        elif status == "lipsync":
-            secs_in = f"{elapsed:.0f}s" if elapsed else "starting"
-            label = f"🎬 Lip-sync · {secs_in}"
-            seg_placeholders[i].markdown(pill(label, "running"), unsafe_allow_html=True)
-        elif status == "done":
-            seg_placeholders[i].markdown(pill("✓ done", "done"), unsafe_allow_html=True)
-        elif status == "error":
-            seg_placeholders[i].markdown(pill(f"✗ {msg[:30]}", "error"),
-                                         unsafe_allow_html=True)
-
-    # Read this user's keys ONCE before the render starts. They're passed
-    # explicitly into each pipeline call so a concurrent user can't race on
-    # them via os.environ.
-    c = creds.require("fal", "elevenlabs")
-
-    # Inline async-await of the pipeline. Streamlit's render is paused
-    # during this — but since lipsync() awaits real network I/O most of the
-    # time, the runtime keeps the UI tab responsive.
     async def driver():
+        paths: dict[str, str] = {}
         for i, seg in enumerate(segments):
             char = cast[seg["character"]]
-            seg_id = f"seg{i:02d}_{char.slug}"
+            audio_path = _audio_path_for(i)
+            paths[str(i)] = str(audio_path)
 
-            audio_dir = episode_dir / "audio"; audio_dir.mkdir(parents=True, exist_ok=True)
-            video_dir = episode_dir / "videos"; video_dir.mkdir(parents=True, exist_ok=True)
-            audio_path = audio_dir / f"{seg_id}.mp3"
-            video_path = video_dir / f"{seg_id}.mp4"
+            if audio_path.exists():
+                seg_placeholders[i].markdown(pill("✓ cached", "done"),
+                                             unsafe_allow_html=True)
+                continue
 
+            seg_placeholders[i].markdown(pill("🎙 generating", "running"),
+                                         unsafe_allow_html=True)
             try:
-                render_status(i, "audio")
                 await generate_tts(
                     text=seg["text"], voice_id=char.voice.voice_id,
                     output_path=audio_path,
@@ -219,10 +207,189 @@ def _render_running():
                     stability=char.voice.stability, similarity=char.voice.similarity,
                     style=char.voice.style, tempo=char.voice.tempo,
                 )
+                seg_placeholders[i].markdown(pill("✓ done", "done"),
+                                             unsafe_allow_html=True)
+            except Exception as e:
+                seg_placeholders[i].markdown(
+                    pill(f"✗ {type(e).__name__}", "error"),
+                    unsafe_allow_html=True,
+                )
+                raise
+        return paths
 
-                render_status(i, "lipsync", elapsed=0)
+    try:
+        episode_dir.mkdir(parents=True, exist_ok=True)
+        audio_paths = asyncio.run(driver())
+        st.session_state.seg_audio_paths = audio_paths
+        st.session_state.render_phase = "review"
+        st.rerun()
+    except Exception as e:
+        st.error(f"**Audio generation failed.** {friendly_error(e)}")
+        if st.button("← Back to preflight"):
+            st.session_state.render_phase = "preflight"
+            st.rerun()
+
+
+# --- Review phase ------------------------------------------------------------
+
+def _render_review_phase():
+    cast = st.session_state.cast
+    segments = st.session_state.segments
+    audio_paths = st.session_state.get("seg_audio_paths") or {}
+    counters = st.session_state.get("seg_regen_counter") or {}
+
+    st.markdown('# Review the audio')
+    st.markdown(
+        '<p class="wz-quiet">Listen to each clip. If a word sounds off, hit '
+        '🔄 Regenerate for a fresh take — eleven_v3 is non-deterministic, '
+        'so a new attempt usually pronounces it differently. Lip-sync only '
+        'runs once you approve.</p>',
+        unsafe_allow_html=True,
+    )
+
+    for i, seg in enumerate(segments):
+        char = cast.get(seg["character"])
+        if char is None:
+            continue
+        with st.container(border=True):
+            row = st.columns([0.7, 4, 1.4])
+            with row[0]:
+                st.image(str(char.image_path), width="stretch")
+            with row[1]:
+                st.markdown(f"**{char.display_name}**")
+                st.markdown(
+                    f'<p style="margin:0.2rem 0 0.5rem 0;">{seg["text"]}</p>',
+                    unsafe_allow_html=True,
+                )
+                audio_str = audio_paths.get(str(i))
+                if audio_str and Path(audio_str).exists():
+                    st.audio(audio_str)
+                else:
+                    st.warning("Audio missing — go back and regenerate")
+            with row[2]:
+                attempts = int(counters.get(str(i), 0))
+                if attempts > 0:
+                    st.markdown(
+                        f'<p class="wz-tiny" style="margin:0 0 0.3rem 0;">'
+                        f'attempt {attempts + 1}</p>',
+                        unsafe_allow_html=True,
+                    )
+                if st.button("🔄 Regenerate", key=f"r_regen_{i}",
+                             width="stretch"):
+                    new_counters = dict(counters)
+                    new_counters[str(i)] = attempts + 1
+                    st.session_state.seg_regen_counter = new_counters
+                    st.session_state.render_phase = "audio"
+                    st.rerun()
+
+    est = estimate_episode(segments)
+    st.markdown('<div class="wz-footer"></div>', unsafe_allow_html=True)
+    nav = st.columns([1, 1, 1.7])
+    with nav[0]:
+        if st.button("← Edit script", key="r_review_back", width="stretch"):
+            st.session_state.render_phase = "preflight"
+            go_to(2)
+            st.rerun()
+    with nav[2]:
+        if st.button(
+            f"✓  Generate videos  ·  ~${est['cost_usd']:.2f}",
+            type="primary", width="stretch", key="r_to_lipsync",
+        ):
+            st.session_state.render_phase = "lipsync"
+            st.session_state.render_started_at = time.time()
+            st.rerun()
+
+
+# --- Lipsync phase -----------------------------------------------------------
+
+def _render_lipsync_phase():
+    cast = st.session_state.cast
+    segments = st.session_state.segments
+    title = st.session_state.title.strip() or "Untitled"
+    slug = safe_episode_slug(title)
+    episode_dir = _episode_dir()
+    audio_paths = st.session_state.get("seg_audio_paths") or {}
+
+    st.markdown(f'# Rendering *{title}*…')
+    st.markdown(
+        '<p class="wz-quiet">Lip-syncing each clip. You can switch tabs — '
+        'we keep working in the background.</p>',
+        unsafe_allow_html=True,
+    )
+
+    seg_placeholders = []
+    for i, seg in enumerate(segments):
+        char = cast[seg["character"]]
+        with st.container(border=True):
+            row = st.columns([0.7, 4, 1.5])
+            with row[0]:
+                st.image(str(char.image_path), width="stretch")
+            with row[1]:
+                st.markdown(f"**{char.display_name}**")
+                st.markdown(
+                    f'<p class="wz-quiet" style="margin:0;">{seg["text"][:80]}'
+                    f'{"…" if len(seg["text"]) > 80 else ""}</p>',
+                    unsafe_allow_html=True,
+                )
+            with row[2]:
+                seg_placeholders.append(st.empty())
+
+    with st.container(border=True):
+        cols = st.columns([4, 1.5])
+        cols[0].markdown("**Stitching all segments together**")
+        concat_placeholder = cols[1].empty()
+
+    for i in range(len(segments)):
+        seg_placeholders[i].markdown(pill("queued", "queued"),
+                                     unsafe_allow_html=True)
+    concat_placeholder.markdown(pill("queued", "queued"),
+                                unsafe_allow_html=True)
+
+    def render_status(i, status, msg="", elapsed=0):
+        if status == "running":
+            secs_in = f"{elapsed:.0f}s" if elapsed else "starting"
+            label = f"🎬 Lip-sync · {secs_in}"
+            seg_placeholders[i].markdown(pill(label, "running"),
+                                         unsafe_allow_html=True)
+        elif status == "cached":
+            seg_placeholders[i].markdown(pill("✓ cached", "done"),
+                                         unsafe_allow_html=True)
+        elif status == "done":
+            seg_placeholders[i].markdown(pill("✓ done", "done"),
+                                         unsafe_allow_html=True)
+        elif status == "error":
+            seg_placeholders[i].markdown(pill(f"✗ {msg[:30]}", "error"),
+                                         unsafe_allow_html=True)
+
+    c = creds.require("fal", "elevenlabs")
+
+    video_dir = episode_dir / "videos"
+    video_dir.mkdir(parents=True, exist_ok=True)
+
+    async def driver():
+        video_paths: list[Path] = []
+        for i, seg in enumerate(segments):
+            char = cast[seg["character"]]
+            audio_path = Path(audio_paths.get(str(i), ""))
+            if not audio_path.exists():
+                # User must have hit reload between phases; restart audio.
+                raise RuntimeError(
+                    f"Audio for segment #{i+1} is missing. "
+                    "Go back and regenerate audio."
+                )
+
+            video_key = video_cache_key(audio_path, char.image_path)
+            video_path = video_dir / f"{video_key}.mp4"
+            video_paths.append(video_path)
+
+            if video_path.exists():
+                render_status(i, "cached")
+                continue
+
+            try:
+                render_status(i, "running", elapsed=0)
                 def cb(elapsed, msg, _i=i):
-                    render_status(_i, "lipsync", msg=msg, elapsed=elapsed)
+                    render_status(_i, "running", msg=msg, elapsed=elapsed)
                 await lipsync(
                     char.image_path, audio_path, video_path,
                     fal_key=c.fal, progress_cb=cb,
@@ -232,20 +399,18 @@ def _render_running():
                 render_status(i, "error", msg=f"{type(e).__name__}")
                 raise
 
-        # Concat
-        concat_placeholder.markdown(pill("⏳ stitching", "running"), unsafe_allow_html=True)
+        concat_placeholder.markdown(pill("⏳ stitching", "running"),
+                                    unsafe_allow_html=True)
         final_path = episode_dir / "final.mp4"
-        video_paths = [episode_dir / "videos" / f"seg{i:02d}_{cast[seg['character']].slug}.mp4"
-                       for i, seg in enumerate(segments)]
+        # Always rebuild final.mp4 — segment order or text may have changed
+        # since the last concat, so the cached final.mp4 is unsafe to reuse.
+        if final_path.exists():
+            final_path.unlink()
         await concat(video_paths, final_path)
-        concat_placeholder.markdown(pill("✓ done", "done"), unsafe_allow_html=True)
-
+        concat_placeholder.markdown(pill("✓ done", "done"),
+                                    unsafe_allow_html=True)
         return final_path
 
-    # Capture pid + configured BEFORE the long asyncio.run() block. Streamlit
-    # Cloud may roll/reconnect the session during a 2+ minute blocking call
-    # and session_state can come back without project_id — that's how the
-    # post-render auto_save silently lost step=3 + result.
     captured_pid = st.session_state.get("project_id")
     persistence_configured = persistence.is_configured()
     started_at = st.session_state.get("render_started_at", time.time())
@@ -255,8 +420,6 @@ def _render_running():
         final_path = asyncio.run(driver())
         elapsed = time.time() - started_at
 
-        # Upload the rendered video to Storage so it survives Streamlit Cloud's
-        # disk wipe + lets recipients of the share-link play it without rerendering.
         video_storage_key = None
         if captured_pid and persistence_configured and final_path.exists():
             try:
@@ -277,42 +440,33 @@ def _render_running():
         st.session_state.result = result_blob
         st.session_state.render_phase = "done"
         st.session_state.step = 3
-        # Restore project_id if Streamlit dropped it during the await.
         if captured_pid and not st.session_state.get("project_id"):
             st.session_state.project_id = captured_pid
 
-        # Direct save using captured_pid — avoids relying on session_state
-        # being intact after the long async block.
         if captured_pid and persistence_configured:
             try:
                 n = persistence.save_state(
-                    captured_pid,
-                    step=3,
-                    result=result_blob,
+                    captured_pid, step=3, result=result_blob,
                 )
                 if n == 0:
                     persistence.upsert_state(
-                        captured_pid,
-                        step=3,
-                        result=result_blob,
+                        captured_pid, step=3, result=result_blob,
                     )
             except Exception:
                 st.toast("Failed to persist render result to cloud", icon="⚠️")
 
-        # Also call auto_save for the full state snapshot (cast, segments, …).
         auto_save()
         st.rerun()
     except Exception as e:
         st.error(f"**Render failed.** {friendly_error(e)}")
         nav = st.columns([1, 1, 1])
         with nav[0]:
-            if st.button("← Edit script"):
-                st.session_state.render_phase = "preflight"
-                go_to(2)
+            if st.button("← Back to review"):
+                st.session_state.render_phase = "review"
                 st.rerun()
         with nav[2]:
             if st.button("↻ Try again", type="primary"):
-                st.session_state.render_phase = "preflight"
+                st.session_state.render_phase = "review"
                 st.rerun()
 
 
@@ -320,25 +474,16 @@ def _render_running():
 
 def _render_done():
     result = st.session_state.result or {}
-    # Older saved rows may not have "title" in the result blob — fall back to
-    # session_state.title (or "Untitled") so the Done page renders cleanly
-    # instead of crashing on a missing key.
     title = (
         result.get("title")
         or (st.session_state.get("title") or "").strip()
         or "Untitled"
     )
 
-    # Reconstruct the local path from the slug (cloud-portable) — older rows
-    # stored an absolute "path" that's only valid on the rendering machine.
-    # Same project_id namespacing as _render_running to avoid cross-project
-    # cache collisions on Streamlit Cloud's shared filesystem.
     slug = result.get("slug") or safe_episode_slug(title)
     pid_done = st.session_state.get("project_id") or "local"
     final_path = EPISODES_DIR / pid_done / slug / "final.mp4"
 
-    # Cross-session resume: when a recipient opens the share-link, the local
-    # disk doesn't have the rendered file. Pull it from Storage.
     if not final_path.exists() and persistence.is_configured():
         pid = st.session_state.get("project_id")
         if pid:
@@ -363,7 +508,6 @@ def _render_done():
             st.error(f"Output missing: {final_path}")
 
     with side:
-        # Older saved rows may not carry elapsed/cost — default rather than crash.
         elapsed = float(result.get("elapsed") or 0.0)
         cost = float(result.get("cost") or 0.0)
         st.markdown(
@@ -388,7 +532,6 @@ def _render_done():
                     key="r_download_video",
                 )
 
-        # Export project zip (keep working on it later)
         zip_bytes = export_project_zip(
             title, st.session_state.cast, st.session_state.segments,
         )
@@ -403,14 +546,23 @@ def _render_done():
 
     st.divider()
 
-    nav = st.columns([1, 1])
+    nav = st.columns([1, 1, 1])
     with nav[0]:
         if st.button("← Edit script", key="done_back", width="stretch"):
             st.session_state.render_phase = "preflight"
             go_to(2)
             st.rerun()
     with nav[1]:
-        if st.button("↻  Start a new project", width="stretch", key="done_new"):
+        if st.button("🔄  Tweak audio", key="done_tweak_audio",
+                     width="stretch",
+                     help="Re-preview & regenerate any clip whose pronunciation was off"):
+            # Route through audio phase so missing files (cross-session reload
+            # on Streamlit Cloud) get regenerated before review tries to play them.
+            st.session_state.render_phase = "audio"
+            st.rerun()
+    with nav[2]:
+        if st.button("↻  Start a new project", width="stretch",
+                     key="done_new"):
             from src.wizard.state import reset_all
             reset_all()
             st.rerun()
