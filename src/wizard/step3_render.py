@@ -46,6 +46,8 @@ def render():
         _render_review_phase()
     elif phase == "lipsync":
         _render_lipsync_phase()
+    elif phase == "refine":
+        _render_refine_phase()
     elif phase == "done":
         _render_done()
     else:
@@ -82,6 +84,24 @@ def _audio_path_for(i: int) -> Path:
         regen_counter=int(counters.get(str(i), 0)),
     )
     return _episode_dir() / "audio" / f"{key}.mp3"
+
+
+def _video_path_for(i: int) -> Path | None:
+    """Content-hash-derived video path for segment i. Returns None if the
+    audio doesn't exist yet (the video hash includes audio bytes)."""
+    segments = st.session_state.segments
+    cast = st.session_state.cast
+    seg = segments[i]
+    char = cast[seg["character"]]
+    audio_path = _audio_path_for(i)
+    if not audio_path.exists():
+        return None
+    counters = st.session_state.get("seg_lipsync_counter") or {}
+    key = video_cache_key(
+        audio_path, char.image_path,
+        regen_counter=int(counters.get(str(i), 0)),
+    )
+    return _episode_dir() / "videos" / f"{key}.mp4"
 
 
 # --- Preflight ---------------------------------------------------------------
@@ -378,7 +398,11 @@ def _render_lipsync_phase():
                     "Go back and regenerate audio."
                 )
 
-            video_key = video_cache_key(audio_path, char.image_path)
+            lipsync_counters = st.session_state.get("seg_lipsync_counter") or {}
+            video_key = video_cache_key(
+                audio_path, char.image_path,
+                regen_counter=int(lipsync_counters.get(str(i), 0)),
+            )
             video_path = video_dir / f"{video_key}.mp4"
             video_paths.append(video_path)
 
@@ -470,6 +494,190 @@ def _render_lipsync_phase():
                 st.rerun()
 
 
+# --- Refine phase (per-segment post-render iteration) -----------------------
+
+def _do_refine_one_segment(i: int) -> None:
+    """Run TTS (if needed) + lip-sync (if needed) for segment i, then re-concat
+    final.mp4 from all segments' current cached videos. Called when a refine-
+    page Regenerate button is clicked.
+
+    Counter bumps happen at the button site BEFORE calling this — by the
+    time we land here, _audio_path_for / _video_path_for already reflect the
+    new desired hash, and the corresponding old file is orphaned on disk.
+    """
+    segments = st.session_state.segments
+    cast = st.session_state.cast
+    title = st.session_state.title.strip() or "Untitled"
+    slug = safe_episode_slug(title)
+    episode_dir = _episode_dir()
+    audio_dir = episode_dir / "audio"
+    video_dir = episode_dir / "videos"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    video_dir.mkdir(parents=True, exist_ok=True)
+
+    c = creds.require("fal", "elevenlabs")
+    char = cast[segments[i]["character"]]
+    audio_path = _audio_path_for(i)
+
+    async def work():
+        if not audio_path.exists():
+            await generate_tts(
+                text=segments[i]["text"], voice_id=char.voice.voice_id,
+                output_path=audio_path,
+                elevenlabs_api_key=c.elevenlabs,
+                stability=char.voice.stability,
+                similarity=char.voice.similarity,
+                style=char.voice.style, tempo=char.voice.tempo,
+            )
+        # video path depends on audio bytes, so it can only be computed now
+        video_path = _video_path_for(i)
+        if video_path is None:
+            raise RuntimeError("Audio missing after generation — bug?")
+        if not video_path.exists():
+            await lipsync(char.image_path, audio_path, video_path,
+                          fal_key=c.fal)
+
+        # Keep seg_audio_paths in sync so the review page can play this audio
+        audio_paths = dict(st.session_state.get("seg_audio_paths") or {})
+        audio_paths[str(i)] = str(audio_path)
+        st.session_state.seg_audio_paths = audio_paths
+
+        # Re-concat from current cached paths for every segment. Bail loudly
+        # if any segment is missing — refine assumes a prior full render.
+        all_videos: list[Path] = []
+        for j in range(len(segments)):
+            vp = _video_path_for(j)
+            if vp is None or not vp.exists():
+                raise RuntimeError(
+                    f"Segment #{j+1} has no cached video. Run a full render first."
+                )
+            all_videos.append(vp)
+
+        final_path = episode_dir / "final.mp4"
+        if final_path.exists():
+            final_path.unlink()
+        await concat(all_videos, final_path)
+
+        # Push the new final.mp4 to storage so the share-link recipient sees it
+        captured_pid = st.session_state.get("project_id")
+        if captured_pid and persistence.is_configured() and final_path.exists():
+            try:
+                video_storage_key = persistence.upload_episode_video(
+                    captured_pid, slug, final_path.read_bytes(),
+                )
+                result = dict(st.session_state.get("result") or {})
+                result["video_storage_key"] = video_storage_key
+                st.session_state.result = result
+            except Exception as e:
+                st.toast(f"Cloud upload failed: {type(e).__name__}",
+                         icon="⚠️")
+
+    asyncio.run(work())
+    auto_save()
+
+
+def _render_refine_phase():
+    cast = st.session_state.cast
+    segments = st.session_state.segments
+    title = st.session_state.title.strip() or "Untitled"
+    episode_dir = _episode_dir()
+    audio_counters = st.session_state.get("seg_regen_counter") or {}
+    lipsync_counters = st.session_state.get("seg_lipsync_counter") or {}
+
+    final_path = episode_dir / "final.mp4"
+
+    st.markdown(f'# Refine *{title}*')
+    st.markdown(
+        '<p class="wz-quiet">Each segment shows its current audio + lip-sync. '
+        'Hit a regenerate button to redo just one — other segments stay '
+        'cached, so it\'s fast and cheap.</p>',
+        unsafe_allow_html=True,
+    )
+
+    if final_path.exists():
+        with st.expander("▶  Watch current final video", expanded=False):
+            st.video(str(final_path))
+
+    for i, seg in enumerate(segments):
+        char = cast.get(seg["character"])
+        if char is None:
+            continue
+        audio_path = _audio_path_for(i)
+        video_path = _video_path_for(i)
+        with st.container(border=True):
+            row = st.columns([0.6, 3.2, 1.8, 1.6])
+            with row[0]:
+                st.image(str(char.image_path), width="stretch")
+            with row[1]:
+                st.markdown(f"**{char.display_name}**")
+                st.markdown(
+                    f'<p style="margin:0.2rem 0 0.5rem 0;">{seg["text"]}</p>',
+                    unsafe_allow_html=True,
+                )
+                if audio_path.exists():
+                    st.audio(str(audio_path))
+                else:
+                    st.warning("Audio missing")
+            with row[2]:
+                if video_path and video_path.exists():
+                    st.video(str(video_path))
+                else:
+                    st.markdown(
+                        '<p class="wz-quiet">no video yet — regenerate</p>',
+                        unsafe_allow_html=True,
+                    )
+            with row[3]:
+                a_attempts = int(audio_counters.get(str(i), 0))
+                v_attempts = int(lipsync_counters.get(str(i), 0))
+                a_label = "🔄 New audio take"
+                if a_attempts > 0:
+                    a_label += f"  ·  #{a_attempts + 1}"
+                if st.button(a_label, key=f"refine_audio_{i}",
+                             width="stretch",
+                             help="Regenerate the speech audio (also re-runs lip-sync since audio changed)"):
+                    new_counters = dict(audio_counters)
+                    new_counters[str(i)] = a_attempts + 1
+                    st.session_state.seg_regen_counter = new_counters
+                    try:
+                        with st.spinner(f"Regenerating segment #{i+1}…"):
+                            _do_refine_one_segment(i)
+                    except Exception as e:
+                        st.error(f"Regen failed: {friendly_error(e)}")
+                    else:
+                        st.rerun()
+
+                v_label = "🎬 New lip-sync take"
+                if v_attempts > 0:
+                    v_label += f"  ·  #{v_attempts + 1}"
+                v_disabled = not (audio_path.exists())
+                if st.button(v_label, key=f"refine_lipsync_{i}",
+                             width="stretch", disabled=v_disabled,
+                             help="Regenerate just the lip-sync video. Audio stays the same."):
+                    new_counters = dict(lipsync_counters)
+                    new_counters[str(i)] = v_attempts + 1
+                    st.session_state.seg_lipsync_counter = new_counters
+                    try:
+                        with st.spinner(f"Lip-syncing segment #{i+1} (~30–60s)…"):
+                            _do_refine_one_segment(i)
+                    except Exception as e:
+                        st.error(f"Regen failed: {friendly_error(e)}")
+                    else:
+                        st.rerun()
+
+    st.markdown('<div class="wz-footer"></div>', unsafe_allow_html=True)
+    nav = st.columns([1, 1, 1])
+    with nav[0]:
+        if st.button("← Back to final", key="refine_back", width="stretch"):
+            st.session_state.render_phase = "done"
+            st.rerun()
+    with nav[2]:
+        if st.button("↻  Re-render everything", key="refine_full",
+                     width="stretch",
+                     help="Skip the cache and regenerate every segment from scratch"):
+            st.session_state.render_phase = "preflight"
+            st.rerun()
+
+
 # --- Done -------------------------------------------------------------------
 
 def _render_done():
@@ -553,12 +761,10 @@ def _render_done():
             go_to(2)
             st.rerun()
     with nav[1]:
-        if st.button("🔄  Tweak audio", key="done_tweak_audio",
+        if st.button("🔄  Refine segments", key="done_refine",
                      width="stretch",
-                     help="Re-preview & regenerate any clip whose pronunciation was off"):
-            # Route through audio phase so missing files (cross-session reload
-            # on Streamlit Cloud) get regenerated before review tries to play them.
-            st.session_state.render_phase = "audio"
+                     help="Per-segment audio + lip-sync regeneration. Other segments stay cached."):
+            st.session_state.render_phase = "refine"
             st.rerun()
     with nav[2]:
         if st.button("↻  Start a new project", width="stretch",

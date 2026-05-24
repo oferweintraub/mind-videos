@@ -42,15 +42,21 @@ def audio_cache_key(
     return h.hexdigest()[:16]
 
 
-def video_cache_key(audio_path: Path, image_path: Path) -> str:
+def video_cache_key(
+    audio_path: Path,
+    image_path: Path,
+    regen_counter: int = 0,
+) -> str:
     """Deterministic 16-char hex key for a lip-sync output.
 
     Hashes the actual bytes of audio + image so the cache stays correct even
-    if those files were regenerated under the same name.
+    if those files were regenerated under the same name. Bump regen_counter
+    to force a fresh lip-sync take of the same audio/image (VEED Fabric is
+    deterministic under the same input, so a counter is the only way to ask
+    for a different render — useful when lip-sync glitches but audio is fine).
     """
     h = hashlib.sha256()
-    h.update(_VIDEO_CACHE_VERSION.encode())
-    h.update(b"|")
+    h.update(f"{_VIDEO_CACHE_VERSION}|{regen_counter}|".encode())
     h.update(Path(audio_path).read_bytes())
     h.update(b"|")
     h.update(Path(image_path).read_bytes())

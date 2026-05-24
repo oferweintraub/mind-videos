@@ -30,7 +30,7 @@ from src.wizard import persistence
 
 WIZARD_KEYS = ("step", "cast", "segments", "title", "result", "render_running",
                "render_phase", "seg_audio_paths", "seg_regen_counter",
-               "render_started_at",
+               "seg_lipsync_counter", "render_started_at",
                "demo_loaded", "loaded_zip_marker", "project_id", "share_keys")
 
 
