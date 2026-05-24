@@ -260,10 +260,11 @@ def _render_review_phase():
 
     st.markdown('# Review the audio')
     st.markdown(
-        '<p class="wz-quiet">Listen to each clip. If a word sounds off, hit '
-        '🔄 Regenerate for a fresh take — eleven_v3 is non-deterministic, '
-        'so a new attempt usually pronounces it differently. Lip-sync only '
-        'runs once you approve.</p>',
+        '<p class="wz-quiet">Listen to each clip. <strong>You can edit the text</strong> '
+        'inline (e.g. add phonetic hints in parentheses) and hit 🔄 Regenerate — '
+        'changing the text auto-busts the cache for a fresh take. If you just want '
+        'V3 to try the same text again (it\'s non-deterministic), Regenerate without '
+        'editing. Lip-sync only runs once you approve.</p>',
         unsafe_allow_html=True,
     )
 
@@ -277,15 +278,29 @@ def _render_review_phase():
                 st.image(str(char.image_path), width="stretch")
             with row[1]:
                 st.markdown(f"**{char.display_name}**")
-                st.markdown(
-                    f'<p style="margin:0.2rem 0 0.5rem 0;">{seg["text"]}</p>',
-                    unsafe_allow_html=True,
+                # Editable text. Streamlit preserves the user's typing under
+                # the `key`, but `value=seg["text"]` is the initial fill on
+                # first render or after we've cleared the key (e.g. when the
+                # user goes back to step 2 to do a bigger edit).
+                edited_text = st.text_area(
+                    label="segment text",
+                    label_visibility="collapsed",
+                    value=seg["text"],
+                    key=f"review_text_{i}",
+                    height=80,
                 )
+                # Sync the user's edit back to the canonical segments list so
+                # that "Generate videos" (or any later cache-key derivation)
+                # uses the latest text — even if the user doesn't hit
+                # Regenerate first.
+                if edited_text != seg["text"]:
+                    segments[i] = {**seg, "text": edited_text}
+
                 audio_str = audio_paths.get(str(i))
                 if audio_str and Path(audio_str).exists():
                     st.audio(audio_str)
                 else:
-                    st.warning("Audio missing — go back and regenerate")
+                    st.warning("Audio missing — hit Regenerate")
             with row[2]:
                 attempts = int(counters.get(str(i), 0))
                 if attempts > 0:
@@ -296,9 +311,22 @@ def _render_review_phase():
                     )
                 if st.button("🔄 Regenerate", key=f"r_regen_{i}",
                              width="stretch"):
-                    new_counters = dict(counters)
-                    new_counters[str(i)] = attempts + 1
-                    st.session_state.seg_regen_counter = new_counters
+                    # Re-read the text_area value (may have just been edited)
+                    # and write through. Text change alone busts the audio
+                    # hash, so only bump the counter when text is unchanged
+                    # (otherwise the user might lose a cache hit if they
+                    # revert their edit later).
+                    fresh_text = st.session_state.get(
+                        f"review_text_{i}", seg["text"]
+                    )
+                    text_changed = fresh_text != seg["text"]
+                    if text_changed:
+                        segments[i] = {**seg, "text": fresh_text}
+                    else:
+                        new_counters = dict(counters)
+                        new_counters[str(i)] = attempts + 1
+                        st.session_state.seg_regen_counter = new_counters
+                    auto_save()
                     st.session_state.render_phase = "audio"
                     st.rerun()
 
@@ -307,6 +335,10 @@ def _render_review_phase():
     nav = st.columns([1, 1, 1.7])
     with nav[0]:
         if st.button("← Edit script", key="r_review_back", width="stretch"):
+            # Drop our text_area keys so a fuller edit in step 2 isn't
+            # shadowed by the stale value the controlled component would
+            # otherwise hold on to when the user comes forward again.
+            _clear_review_text_keys()
             st.session_state.render_phase = "preflight"
             go_to(2)
             st.rerun()
@@ -318,6 +350,25 @@ def _render_review_phase():
             st.session_state.render_phase = "lipsync"
             st.session_state.render_started_at = time.time()
             st.rerun()
+
+
+def _clear_review_text_keys() -> None:
+    """Drop all `review_text_*` session_state keys. Streamlit's controlled
+    components persist by key, so leaving them around would shadow any
+    programmatic update to segments[i].text (e.g. an edit the user made on
+    step 2 after navigating back)."""
+    stale = [k for k in list(st.session_state.keys())
+             if isinstance(k, str) and k.startswith("review_text_")]
+    for k in stale:
+        del st.session_state[k]
+
+
+def _clear_refine_text_keys() -> None:
+    """Same as _clear_review_text_keys for the refine page."""
+    stale = [k for k in list(st.session_state.keys())
+             if isinstance(k, str) and k.startswith("refine_text_")]
+    for k in stale:
+        del st.session_state[k]
 
 
 # --- Lipsync phase -----------------------------------------------------------
@@ -589,8 +640,9 @@ def _render_refine_phase():
     st.markdown(f'# Refine *{title}*')
     st.markdown(
         '<p class="wz-quiet">Each segment shows its current audio + lip-sync. '
-        'Hit a regenerate button to redo just one — other segments stay '
-        'cached, so it\'s fast and cheap.</p>',
+        '<strong>You can edit the text</strong> inline (e.g. add phonetic hints) '
+        'and hit 🔄 New audio take — text changes auto-bust the cache. '
+        'Other segments stay cached, so it\'s fast and cheap.</p>',
         unsafe_allow_html=True,
     )
 
@@ -610,14 +662,19 @@ def _render_refine_phase():
                 st.image(str(char.image_path), width="stretch")
             with row[1]:
                 st.markdown(f"**{char.display_name}**")
-                st.markdown(
-                    f'<p style="margin:0.2rem 0 0.5rem 0;">{seg["text"]}</p>',
-                    unsafe_allow_html=True,
+                edited_text = st.text_area(
+                    label="segment text",
+                    label_visibility="collapsed",
+                    value=seg["text"],
+                    key=f"refine_text_{i}",
+                    height=80,
                 )
+                if edited_text != seg["text"]:
+                    segments[i] = {**seg, "text": edited_text}
                 if audio_path.exists():
                     st.audio(str(audio_path))
                 else:
-                    st.warning("Audio missing")
+                    st.warning("Audio missing — hit New audio take")
             with row[2]:
                 if video_path and video_path.exists():
                     st.video(str(video_path))
@@ -634,10 +691,20 @@ def _render_refine_phase():
                     a_label += f"  ·  #{a_attempts + 1}"
                 if st.button(a_label, key=f"refine_audio_{i}",
                              width="stretch",
-                             help="Regenerate the speech audio (also re-runs lip-sync since audio changed)"):
-                    new_counters = dict(audio_counters)
-                    new_counters[str(i)] = a_attempts + 1
-                    st.session_state.seg_regen_counter = new_counters
+                             help="Regenerate the speech audio (also re-runs lip-sync since audio changed). Edit the text above first to fix pronunciation."):
+                    # Read text_area in case the user just edited it. Text
+                    # change alone busts the audio hash; only bump the counter
+                    # if the text was left as-is.
+                    fresh_text = st.session_state.get(
+                        f"refine_text_{i}", seg["text"]
+                    )
+                    text_changed = fresh_text != seg["text"]
+                    if text_changed:
+                        segments[i] = {**seg, "text": fresh_text}
+                    else:
+                        new_counters = dict(audio_counters)
+                        new_counters[str(i)] = a_attempts + 1
+                        st.session_state.seg_regen_counter = new_counters
                     try:
                         with st.spinner(f"Regenerating segment #{i+1}…"):
                             _do_refine_one_segment(i)
@@ -668,12 +735,14 @@ def _render_refine_phase():
     nav = st.columns([1, 1, 1])
     with nav[0]:
         if st.button("← Back to final", key="refine_back", width="stretch"):
+            _clear_refine_text_keys()
             st.session_state.render_phase = "done"
             st.rerun()
     with nav[2]:
         if st.button("↻  Re-render everything", key="refine_full",
                      width="stretch",
                      help="Skip the cache and regenerate every segment from scratch"):
+            _clear_refine_text_keys()
             st.session_state.render_phase = "preflight"
             st.rerun()
 
