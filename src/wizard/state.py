@@ -26,6 +26,7 @@ import streamlit as st
 from src.character import Character, Voice, list_all as list_characters, load as load_character
 from src.script_format import parse
 from src.wizard import persistence
+from src.pipeline.cache_keys import audio_cache_key
 
 
 WIZARD_KEYS = ("step", "cast", "segments", "title", "result", "render_running",
@@ -326,9 +327,42 @@ def safe_episode_slug(text: str, fallback: str = "my_episode") -> str:
     return safe_slug(text, fallback)
 
 
-# --- Cache invalidation -------------------------------------------------------
+# --- Pipeline paths -----------------------------------------------------------
 
 EPISODES_DIR = Path(__file__).resolve().parent.parent.parent / "episodes"
+
+
+def episode_dir() -> Path:
+    """Per-project episode dir on disk, namespaced by project_id so a
+    different project on the same Streamlit Cloud worker can't poison the
+    skip-if-exists cache for this one."""
+    title = (st.session_state.get("title") or "").strip() or "Untitled"
+    pid = st.session_state.get("project_id") or "local"
+    return EPISODES_DIR / pid / safe_episode_slug(title)
+
+
+def audio_path_for_segment(i: int) -> Path:
+    """Content-hash-derived audio path for segment i.
+
+    Same hash key everywhere (step 2 inline gen, step 3 audio phase, step 3
+    refine) so a TTS file generated on one page is a cache hit on another.
+    Hash inputs: text, voice settings, tempo, regen_counter.
+    """
+    segments = st.session_state.segments
+    cast = st.session_state.cast
+    seg = segments[i]
+    char = cast[seg["character"]]
+    counters = st.session_state.get("seg_regen_counter") or {}
+    key = audio_cache_key(
+        text=seg["text"],
+        voice_id=char.voice.voice_id,
+        tempo=char.voice.tempo,
+        stability=char.voice.stability,
+        similarity=char.voice.similarity,
+        style=char.voice.style,
+        regen_counter=int(counters.get(str(i), 0)),
+    )
+    return episode_dir() / "audio" / f"{key}.mp3"
 
 
 def invalidate_episode_for_character(slug: str) -> int:

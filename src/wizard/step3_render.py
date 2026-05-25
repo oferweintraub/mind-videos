@@ -21,10 +21,10 @@ from pathlib import Path
 import streamlit as st
 
 from src.pipeline.episode import generate_tts, lipsync, concat
-from src.pipeline.cache_keys import audio_cache_key, video_cache_key
+from src.pipeline.cache_keys import video_cache_key
 from src.wizard.state import (
     estimate_episode, safe_episode_slug, export_project_zip, go_to,
-    auto_save,
+    auto_save, episode_dir as _episode_dir, audio_path_for_segment as _audio_path_for,
 )
 from src.wizard.theme import PALETTE, pill
 from src.wizard import creds, persistence
@@ -55,35 +55,9 @@ def render():
 
 
 # --- Path helpers ------------------------------------------------------------
-
-def _episode_dir() -> Path:
-    """Per-project episode dir. Namespacing by project_id prevents cross-project
-    cache poisoning on Streamlit Cloud's shared filesystem."""
-    title = (st.session_state.get("title") or "").strip() or "Untitled"
-    slug = safe_episode_slug(title)
-    pid = st.session_state.get("project_id") or "local"
-    return EPISODES_DIR / pid / slug
-
-
-def _audio_path_for(i: int) -> Path:
-    """Content-hash-derived audio path for segment i. Same inputs → same path
-    → cache hit. To force a fresh take of identical text, bump the segment's
-    regen_counter (via the Regenerate button on the review page)."""
-    segments = st.session_state.segments
-    cast = st.session_state.cast
-    seg = segments[i]
-    char = cast[seg["character"]]
-    counters = st.session_state.get("seg_regen_counter") or {}
-    key = audio_cache_key(
-        text=seg["text"],
-        voice_id=char.voice.voice_id,
-        tempo=char.voice.tempo,
-        stability=char.voice.stability,
-        similarity=char.voice.similarity,
-        style=char.voice.style,
-        regen_counter=int(counters.get(str(i), 0)),
-    )
-    return _episode_dir() / "audio" / f"{key}.mp3"
+# _episode_dir() and _audio_path_for() are imported from state.py so step2
+# (per-segment audio gen) and step3 (audio/lipsync/refine) share the same
+# hash-keyed cache layout.
 
 
 def _video_path_for(i: int) -> Path | None:

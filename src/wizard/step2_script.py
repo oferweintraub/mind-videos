@@ -4,6 +4,8 @@ Title field + vertical list of segment cards. Each card has:
 - Avatar + character dropdown (from the cast)
 - RTL Hebrew textarea
 - Live audio-length estimate
+- Per-segment "🎙 Generate audio" preview + 🔄 Regenerate (lets the user
+  catch pronunciation issues here before paying for lip-sync)
 - Reorder up/down + remove buttons
 
 A live "running cost" rail shows total seconds + cost.
@@ -11,11 +13,16 @@ A live "running cost" rail shows total seconds + cost.
 
 from __future__ import annotations
 
+import asyncio
+
 import streamlit as st
 
+from src.pipeline.episode import generate_tts
+from src.wizard import creds
+from src.wizard.errors import friendly_error
 from src.wizard.state import (
     add_segment, remove_segment, move_segment, estimate_segment_seconds,
-    estimate_episode, go_to,
+    estimate_episode, go_to, audio_path_for_segment,
 )
 from src.wizard.theme import PALETTE
 
@@ -32,7 +39,12 @@ def render():
     st.markdown("# Write the script")
     st.markdown(
         '<p class="wz-quiet">Each segment is one character speaking one line in Hebrew. '
-        'Add as many as you like.</p>',
+        'Add as many as you like. Use <strong>🎙 Generate audio</strong> on any segment '
+        'to preview the TTS before paying for lip-sync — cheap (~$0.05) and catches '
+        'pronunciation issues early.<br/>'
+        '<strong>💡 Stubborn word?</strong> Type it with niqqud — e.g. '
+        '<code>חַסְקָה</code> instead of <code>חסקה</code>. eleven_v3 reads Hebrew '
+        'vowel marks.</p>',
         unsafe_allow_html=True,
     )
 
@@ -132,6 +144,80 @@ def render():
                     f'</p>',
                     unsafe_allow_html=True,
                 )
+
+                # Inline audio preview / regen. Uses the same content-hash
+                # cache as step3, so anything generated here is a cache hit
+                # when the user proceeds to render → no double-pay.
+                if char and seg.get("text", "").strip():
+                    audio_path = audio_path_for_segment(i)
+                    counters_state = (
+                        st.session_state.get("seg_regen_counter") or {}
+                    )
+                    attempts = int(counters_state.get(str(i), 0))
+                    audio_row = st.columns([2.5, 1])
+                    with audio_row[0]:
+                        if audio_path.exists():
+                            st.audio(str(audio_path))
+                        else:
+                            st.markdown(
+                                '<p class="wz-tiny" style="margin:0.4rem 0 0 0;">'
+                                'no audio yet — generate to preview pronunciation'
+                                '</p>',
+                                unsafe_allow_html=True,
+                            )
+                    with audio_row[1]:
+                        label = (
+                            "🔄 Regenerate" if audio_path.exists()
+                            else "🎙 Generate audio"
+                        )
+                        if attempts > 0:
+                            label += f"  ·  #{attempts + 1}"
+                        if st.button(
+                            label, key=f"seg_audiogen_{i}", width="stretch",
+                            help="Run ElevenLabs TTS for this segment only. "
+                                 "Edit the text first to fix a pronunciation; "
+                                 "text changes auto-bust the cache.",
+                        ):
+                            c = creds.read()
+                            if not c.elevenlabs:
+                                st.error(
+                                    "Add **ElevenLabs** key in the Settings panel first."
+                                )
+                            else:
+                                # If the file already exists, the user must
+                                # want a fresh V3 take of the same text →
+                                # bump the counter so the hash changes.
+                                # Otherwise the text just changed or this is
+                                # the first take → run with current hash.
+                                if audio_path.exists():
+                                    new_counters = dict(counters_state)
+                                    new_counters[str(i)] = attempts + 1
+                                    st.session_state.seg_regen_counter = new_counters
+                                target = audio_path_for_segment(i)
+                                try:
+                                    with st.spinner(
+                                        f"Generating audio for segment #{i+1}…"
+                                    ):
+                                        target.parent.mkdir(parents=True, exist_ok=True)
+                                        asyncio.run(generate_tts(
+                                            text=seg["text"],
+                                            voice_id=char.voice.voice_id,
+                                            output_path=target,
+                                            elevenlabs_api_key=c.elevenlabs,
+                                            stability=char.voice.stability,
+                                            similarity=char.voice.similarity,
+                                            style=char.voice.style,
+                                            tempo=char.voice.tempo,
+                                        ))
+                                    paths = dict(
+                                        st.session_state.get("seg_audio_paths") or {}
+                                    )
+                                    paths[str(i)] = str(target)
+                                    st.session_state.seg_audio_paths = paths
+                                except Exception as e:
+                                    st.error(f"Audio gen failed: {friendly_error(e)}")
+                                else:
+                                    st.rerun()
 
         # Add segment button
         if st.button("+ Add segment", key="seg_add", width="stretch"):
