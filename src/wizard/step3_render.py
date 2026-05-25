@@ -261,10 +261,12 @@ def _render_review_phase():
     st.markdown('# Review the audio')
     st.markdown(
         '<p class="wz-quiet">Listen to each clip. <strong>You can edit the text</strong> '
-        'inline (e.g. add phonetic hints in parentheses) and hit 🔄 Regenerate — '
-        'changing the text auto-busts the cache for a fresh take. If you just want '
-        'V3 to try the same text again (it\'s non-deterministic), Regenerate without '
-        'editing. Lip-sync only runs once you approve.</p>',
+        'inline and hit 🔄 Regenerate — changing the text auto-busts the cache for a '
+        'fresh take. If V3 just sounds non-deterministic, Regenerate without editing. '
+        'Lip-sync only runs once you approve.<br/>'
+        '<strong>💡 Stubborn word?</strong> Type it with niqqud — e.g. '
+        '<code>חַסְקָה</code> instead of <code>חסקה</code>. eleven_v3 reads Hebrew '
+        'vowel marks and pronounces accordingly.</p>',
         unsafe_allow_html=True,
     )
 
@@ -640,9 +642,12 @@ def _render_refine_phase():
     st.markdown(f'# Refine *{title}*')
     st.markdown(
         '<p class="wz-quiet">Each segment shows its current audio + lip-sync. '
-        '<strong>You can edit the text</strong> inline (e.g. add phonetic hints) '
-        'and hit 🔄 New audio take — text changes auto-bust the cache. '
-        'Other segments stay cached, so it\'s fast and cheap.</p>',
+        '<strong>You can edit the text</strong> inline and hit 🔄 New audio take — '
+        'text changes auto-bust the cache. Other segments stay cached, so it\'s '
+        'fast and cheap.<br/>'
+        '<strong>💡 Stubborn word?</strong> Type it with niqqud — e.g. '
+        '<code>חַסְקָה</code> instead of <code>חסקה</code>. eleven_v3 reads '
+        'Hebrew vowel marks and pronounces accordingly.</p>',
         unsafe_allow_html=True,
     )
 
