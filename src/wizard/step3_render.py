@@ -2,14 +2,19 @@
 
 Sub-phases (st.session_state.render_phase):
 - "preflight": summary card + Generate button
-- "audio":     generate TTS for every segment (fast, no lip-sync $$)
-- "review":    per-segment audio players + 🔄 Regenerate buttons
+- "audio":     run TTS for any segment whose hash-keyed file is missing
+               (cache hits for anything pre-generated on Step 2), then
+               auto-advance to lipsync
 - "lipsync":   live progress while VEED renders each segment + concat
 - "done":      inline player + download + buttons
+- "refine":    post-render per-segment regen (audio + lipsync)
 
 Audio + video files are cached by content hash (see pipeline/cache_keys.py)
 so changing one segment doesn't bust the others — fixes the "fix one
 pronunciation, lose another" complaint with eleven_v3's non-determinism.
+
+Per-segment audio preview lives on Step 2 (the Script page) — see
+step2_script.py. That's why there's no in-step-3 "review" phase anymore.
 """
 
 from __future__ import annotations
@@ -40,10 +45,15 @@ def render():
         st.session_state.render_phase = "preflight"
 
     phase = st.session_state.render_phase
+    # "review" is a legacy phase value from earlier code; saved sessions on
+    # it should jump straight to lipsync (audio is already there) rather than
+    # back to preflight.
+    if phase == "review":
+        st.session_state.render_phase = "lipsync"
+        st.session_state.render_started_at = time.time()
+        phase = "lipsync"
     if phase == "audio":
         _render_audio_phase()
-    elif phase == "review":
-        _render_review_phase()
     elif phase == "lipsync":
         _render_lipsync_phase()
     elif phase == "refine":
@@ -87,8 +97,9 @@ def _render_preflight():
 
     st.markdown("# Ready to render?")
     st.markdown(
-        '<p class="wz-quiet">First we generate the audio so you can preview each '
-        'clip — then you approve before we spend money on lip-sync.</p>',
+        '<p class="wz-quiet">Generates any audio you haven\'t already previewed '
+        'on Step 2, then runs lip-sync and stitches the final video. Anything you '
+        'pre-generated on the Script page is a cache hit — no double-pay.</p>',
         unsafe_allow_html=True,
     )
 
@@ -131,13 +142,14 @@ def _render_preflight():
 
     with nav_fwd:
         if st.button(
-            "▶  Generate audio (preview first)",
+            f"▶  Generate video  ·  ~${est['cost_usd']:.2f}",
             type="primary",
             disabled=bool(missing) or len(segments) == 0,
             width="stretch",
             key="r_generate",
         ):
             st.session_state.render_phase = "audio"
+            st.session_state.render_started_at = time.time()
             st.rerun()
 
 
@@ -151,7 +163,7 @@ def _render_audio_phase():
 
     st.markdown(f'# Generating audio for *{title}*…')
     st.markdown(
-        '<p class="wz-quiet">Fast part — you\'ll preview each clip in a moment.</p>',
+        '<p class="wz-quiet">Fast part — anything you previewed on Step 2 is a cache hit; only new/edited segments run TTS.</p>',
         unsafe_allow_html=True,
     )
 
@@ -215,7 +227,10 @@ def _render_audio_phase():
         episode_dir.mkdir(parents=True, exist_ok=True)
         audio_paths = asyncio.run(driver())
         st.session_state.seg_audio_paths = audio_paths
-        st.session_state.render_phase = "review"
+        # Skip the (removed) review page; user already iterated on Step 2.
+        # Keep render_started_at as it was set at preflight so the Done page
+        # reports correct total elapsed wall-clock for the full render.
+        st.session_state.render_phase = "lipsync"
         st.rerun()
     except Exception as e:
         st.error(f"**Audio generation failed.** {friendly_error(e)}")
@@ -224,123 +239,11 @@ def _render_audio_phase():
             st.rerun()
 
 
-# --- Review phase ------------------------------------------------------------
-
-def _render_review_phase():
-    cast = st.session_state.cast
-    segments = st.session_state.segments
-    audio_paths = st.session_state.get("seg_audio_paths") or {}
-    counters = st.session_state.get("seg_regen_counter") or {}
-
-    st.markdown('# Review the audio')
-    st.markdown(
-        '<p class="wz-quiet">Listen to each clip. <strong>You can edit the text</strong> '
-        'inline and hit 🔄 Regenerate — changing the text auto-busts the cache for a '
-        'fresh take. If V3 just sounds non-deterministic, Regenerate without editing. '
-        'Lip-sync only runs once you approve.<br/>'
-        '<strong>💡 Stubborn word?</strong> Type it with niqqud — e.g. '
-        '<code>חַסְקָה</code> instead of <code>חסקה</code>. eleven_v3 reads Hebrew '
-        'vowel marks and pronounces accordingly.</p>',
-        unsafe_allow_html=True,
-    )
-
-    for i, seg in enumerate(segments):
-        char = cast.get(seg["character"])
-        if char is None:
-            continue
-        with st.container(border=True):
-            row = st.columns([0.7, 4, 1.4])
-            with row[0]:
-                st.image(str(char.image_path), width="stretch")
-            with row[1]:
-                st.markdown(f"**{char.display_name}**")
-                # Editable text. Streamlit preserves the user's typing under
-                # the `key`, but `value=seg["text"]` is the initial fill on
-                # first render or after we've cleared the key (e.g. when the
-                # user goes back to step 2 to do a bigger edit).
-                edited_text = st.text_area(
-                    label="segment text",
-                    label_visibility="collapsed",
-                    value=seg["text"],
-                    key=f"review_text_{i}",
-                    height=80,
-                )
-                # Sync the user's edit back to the canonical segments list so
-                # that "Generate videos" (or any later cache-key derivation)
-                # uses the latest text — even if the user doesn't hit
-                # Regenerate first.
-                if edited_text != seg["text"]:
-                    segments[i] = {**seg, "text": edited_text}
-
-                audio_str = audio_paths.get(str(i))
-                if audio_str and Path(audio_str).exists():
-                    st.audio(audio_str)
-                else:
-                    st.warning("Audio missing — hit Regenerate")
-            with row[2]:
-                attempts = int(counters.get(str(i), 0))
-                if attempts > 0:
-                    st.markdown(
-                        f'<p class="wz-tiny" style="margin:0 0 0.3rem 0;">'
-                        f'attempt {attempts + 1}</p>',
-                        unsafe_allow_html=True,
-                    )
-                if st.button("🔄 Regenerate", key=f"r_regen_{i}",
-                             width="stretch"):
-                    # Re-read the text_area value (may have just been edited)
-                    # and write through. Text change alone busts the audio
-                    # hash, so only bump the counter when text is unchanged
-                    # (otherwise the user might lose a cache hit if they
-                    # revert their edit later).
-                    fresh_text = st.session_state.get(
-                        f"review_text_{i}", seg["text"]
-                    )
-                    text_changed = fresh_text != seg["text"]
-                    if text_changed:
-                        segments[i] = {**seg, "text": fresh_text}
-                    else:
-                        new_counters = dict(counters)
-                        new_counters[str(i)] = attempts + 1
-                        st.session_state.seg_regen_counter = new_counters
-                    auto_save()
-                    st.session_state.render_phase = "audio"
-                    st.rerun()
-
-    est = estimate_episode(segments)
-    st.markdown('<div class="wz-footer"></div>', unsafe_allow_html=True)
-    nav = st.columns([1, 1, 1.7])
-    with nav[0]:
-        if st.button("← Edit script", key="r_review_back", width="stretch"):
-            # Drop our text_area keys so a fuller edit in step 2 isn't
-            # shadowed by the stale value the controlled component would
-            # otherwise hold on to when the user comes forward again.
-            _clear_review_text_keys()
-            st.session_state.render_phase = "preflight"
-            go_to(2)
-            st.rerun()
-    with nav[2]:
-        if st.button(
-            f"✓  Generate videos  ·  ~${est['cost_usd']:.2f}",
-            type="primary", width="stretch", key="r_to_lipsync",
-        ):
-            st.session_state.render_phase = "lipsync"
-            st.session_state.render_started_at = time.time()
-            st.rerun()
-
-
-def _clear_review_text_keys() -> None:
-    """Drop all `review_text_*` session_state keys. Streamlit's controlled
-    components persist by key, so leaving them around would shadow any
-    programmatic update to segments[i].text (e.g. an edit the user made on
-    step 2 after navigating back)."""
-    stale = [k for k in list(st.session_state.keys())
-             if isinstance(k, str) and k.startswith("review_text_")]
-    for k in stale:
-        del st.session_state[k]
-
-
 def _clear_refine_text_keys() -> None:
-    """Same as _clear_review_text_keys for the refine page."""
+    """Drop all `refine_text_*` session_state keys. Streamlit's controlled
+    components persist by key, so leaving them around would shadow a
+    programmatic update to segments[i].text (e.g. an edit the user made on
+    step 2 after navigating back from refine)."""
     stale = [k for k in list(st.session_state.keys())
              if isinstance(k, str) and k.startswith("refine_text_")]
     for k in stale:
@@ -512,12 +415,13 @@ def _render_lipsync_phase():
         st.error(f"**Render failed.** {friendly_error(e)}")
         nav = st.columns([1, 1, 1])
         with nav[0]:
-            if st.button("← Back to review"):
-                st.session_state.render_phase = "review"
+            if st.button("← Edit script"):
+                st.session_state.render_phase = "preflight"
+                go_to(2)
                 st.rerun()
         with nav[2]:
             if st.button("↻ Try again", type="primary"):
-                st.session_state.render_phase = "review"
+                st.session_state.render_phase = "preflight"
                 st.rerun()
 
 
