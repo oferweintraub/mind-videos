@@ -365,6 +365,80 @@ def audio_path_for_segment(i: int) -> Path:
     return episode_dir() / "audio" / f"{key}.mp3"
 
 
+# --- Per-segment storage round-trip (Streamlit Cloud disk-wipe survival) ----
+# Without these, only final.mp4 makes it to Supabase Storage and a deploy
+# restart wipes all per-segment audio/video. The next refine click then has
+# to re-pay TTS + lipsync for every segment. With these, the hash-keyed
+# files survive restarts: refine downloads them instead of regenerating.
+
+def _current_episode_slug() -> str:
+    title = (st.session_state.get("title") or "").strip() or "Untitled"
+    return safe_episode_slug(title)
+
+
+def push_segment_audio_to_storage(audio_path: Path) -> None:
+    """Best-effort upload of a freshly-generated segment audio file.
+    Silently skips when Supabase isn't configured or the file is missing
+    — never blocks the user."""
+    pid = st.session_state.get("project_id")
+    if not (pid and persistence.is_configured() and audio_path.exists()):
+        return
+    try:
+        persistence.upload_segment_audio(
+            pid, _current_episode_slug(), audio_path.stem,
+            audio_path.read_bytes(),
+        )
+    except Exception:
+        pass
+
+
+def pull_segment_audio_from_storage(audio_path: Path) -> bool:
+    """Best-effort download into audio_path. Returns True if the file is
+    on disk afterwards (either it already was, or download succeeded)."""
+    if audio_path.exists():
+        return True
+    pid = st.session_state.get("project_id")
+    if not (pid and persistence.is_configured()):
+        return False
+    data = persistence.download_segment_audio(
+        pid, _current_episode_slug(), audio_path.stem,
+    )
+    if data is None:
+        return False
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+    audio_path.write_bytes(data)
+    return True
+
+
+def push_segment_video_to_storage(video_path: Path) -> None:
+    pid = st.session_state.get("project_id")
+    if not (pid and persistence.is_configured() and video_path.exists()):
+        return
+    try:
+        persistence.upload_segment_video(
+            pid, _current_episode_slug(), video_path.stem,
+            video_path.read_bytes(),
+        )
+    except Exception:
+        pass
+
+
+def pull_segment_video_from_storage(video_path: Path) -> bool:
+    if video_path.exists():
+        return True
+    pid = st.session_state.get("project_id")
+    if not (pid and persistence.is_configured()):
+        return False
+    data = persistence.download_segment_video(
+        pid, _current_episode_slug(), video_path.stem,
+    )
+    if data is None:
+        return False
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    video_path.write_bytes(data)
+    return True
+
+
 def invalidate_episode_for_character(slug: str) -> int:
     """Delete cached pipeline artefacts for any segment using this character.
 

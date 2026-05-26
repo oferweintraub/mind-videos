@@ -268,6 +268,74 @@ def download_episode_video(project_id: str, slug: str) -> Optional[bytes]:
 
 
 # ---------------------------------------------------------------------------
+# Per-segment audio / video CRUD (storage bucket)
+# ---------------------------------------------------------------------------
+# Streamlit Cloud's ephemeral disk wipes per-segment files on container
+# restart. Persisting each segment's audio + video to Storage means:
+# - Refine page can `download` instead of `regenerate` (free, bit-identical)
+# - Cross-session resume keeps the same approved audio takes
+# Keyed by content hash → same key Storage-side as on local disk, so a hit
+# at one side guarantees a hit at the other.
+
+def _segment_audio_key(project_id: str, episode_slug: str, audio_hash: str) -> str:
+    return f"{project_id}/seg_{episode_slug}_audio_{audio_hash}.mp3"
+
+
+def _segment_video_key(project_id: str, episode_slug: str, video_hash: str) -> str:
+    return f"{project_id}/seg_{episode_slug}_video_{video_hash}.mp4"
+
+
+def upload_segment_audio(
+    project_id: str, episode_slug: str, audio_hash: str, audio_bytes: bytes,
+) -> str:
+    """Upload (or overwrite) a per-segment audio file. Returns the storage key."""
+    key = _segment_audio_key(project_id, episode_slug, audio_hash)
+    _client().storage.from_(_BUCKET).upload(
+        path=key,
+        file=audio_bytes,
+        file_options={"content-type": "audio/mpeg", "upsert": "true"},
+    )
+    return key
+
+
+def download_segment_audio(
+    project_id: str, episode_slug: str, audio_hash: str,
+) -> Optional[bytes]:
+    """Download a per-segment audio file. Returns bytes or None if missing."""
+    try:
+        return _client().storage.from_(_BUCKET).download(
+            _segment_audio_key(project_id, episode_slug, audio_hash)
+        )
+    except Exception:
+        return None
+
+
+def upload_segment_video(
+    project_id: str, episode_slug: str, video_hash: str, video_bytes: bytes,
+) -> str:
+    """Upload (or overwrite) a per-segment lip-sync video. Returns the storage key."""
+    key = _segment_video_key(project_id, episode_slug, video_hash)
+    _client().storage.from_(_BUCKET).upload(
+        path=key,
+        file=video_bytes,
+        file_options={"content-type": "video/mp4", "upsert": "true"},
+    )
+    return key
+
+
+def download_segment_video(
+    project_id: str, episode_slug: str, video_hash: str,
+) -> Optional[bytes]:
+    """Download a per-segment lip-sync video. Returns bytes or None if missing."""
+    try:
+        return _client().storage.from_(_BUCKET).download(
+            _segment_video_key(project_id, episode_slug, video_hash)
+        )
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Project ↔ session_state helpers (called from the wizard)
 # ---------------------------------------------------------------------------
 

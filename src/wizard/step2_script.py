@@ -23,6 +23,7 @@ from src.wizard.errors import friendly_error
 from src.wizard.state import (
     add_segment, remove_segment, move_segment, estimate_segment_seconds,
     estimate_episode, go_to, audio_path_for_segment,
+    push_segment_audio_to_storage, pull_segment_audio_from_storage,
 )
 from src.wizard.theme import PALETTE
 
@@ -146,10 +147,17 @@ def render():
                 )
 
                 # Inline audio preview / regen. Uses the same content-hash
-                # cache as step3, so anything generated here is a cache hit
-                # when the user proceeds to render → no double-pay.
+                # cache as step3 (and Supabase Storage), so anything generated
+                # here is a cache hit when the user proceeds to render → no
+                # double-pay.
                 if char and seg.get("text", "").strip():
                     audio_path = audio_path_for_segment(i)
+                    # Cheap recovery: if local disk was wiped (Streamlit Cloud
+                    # restart) but the audio is in Supabase Storage, pull it
+                    # so the player shows on reload. Storage hit is ~100ms,
+                    # bit-identical to the original take.
+                    if not audio_path.exists():
+                        pull_segment_audio_from_storage(audio_path)
                     counters_state = (
                         st.session_state.get("seg_regen_counter") or {}
                     )
@@ -194,11 +202,11 @@ def render():
                                     new_counters[str(i)] = attempts + 1
                                     st.session_state.seg_regen_counter = new_counters
                                 target = audio_path_for_segment(i)
+                                target.parent.mkdir(parents=True, exist_ok=True)
                                 try:
                                     with st.spinner(
                                         f"Generating audio for segment #{i+1}…"
                                     ):
-                                        target.parent.mkdir(parents=True, exist_ok=True)
                                         asyncio.run(generate_tts(
                                             text=seg["text"],
                                             voice_id=char.voice.voice_id,
@@ -209,6 +217,10 @@ def render():
                                             style=char.voice.style,
                                             tempo=char.voice.tempo,
                                         ))
+                                    # Persist to cloud so this take survives
+                                    # disk wipes and is bit-identical on
+                                    # later refine/recovery.
+                                    push_segment_audio_to_storage(target)
                                     paths = dict(
                                         st.session_state.get("seg_audio_paths") or {}
                                     )

@@ -30,6 +30,8 @@ from src.pipeline.cache_keys import video_cache_key
 from src.wizard.state import (
     estimate_episode, safe_episode_slug, export_project_zip, go_to,
     auto_save, episode_dir as _episode_dir, audio_path_for_segment as _audio_path_for,
+    push_segment_audio_to_storage, pull_segment_audio_from_storage,
+    push_segment_video_to_storage, pull_segment_video_from_storage,
 )
 from src.wizard.theme import PALETTE, pill
 from src.wizard import creds, persistence
@@ -203,6 +205,12 @@ def _render_audio_phase():
                                              unsafe_allow_html=True)
                 continue
 
+            # Try Storage first — survives Streamlit Cloud's disk wipe.
+            if pull_segment_audio_from_storage(audio_path):
+                seg_placeholders[i].markdown(pill("✓ from cloud", "done"),
+                                             unsafe_allow_html=True)
+                continue
+
             seg_placeholders[i].markdown(pill("🎙 generating", "running"),
                                          unsafe_allow_html=True)
             try:
@@ -213,6 +221,7 @@ def _render_audio_phase():
                     stability=char.voice.stability, similarity=char.voice.similarity,
                     style=char.voice.style, tempo=char.voice.tempo,
                 )
+                push_segment_audio_to_storage(audio_path)
                 seg_placeholders[i].markdown(pill("✓ done", "done"),
                                              unsafe_allow_html=True)
             except Exception as e:
@@ -340,6 +349,11 @@ def _render_lipsync_phase():
                 render_status(i, "cached")
                 continue
 
+            # Try Storage — survives Streamlit Cloud's disk wipe.
+            if pull_segment_video_from_storage(video_path):
+                render_status(i, "cached")
+                continue
+
             try:
                 render_status(i, "running", elapsed=0)
                 def cb(elapsed, msg, _i=i):
@@ -348,6 +362,7 @@ def _render_lipsync_phase():
                     char.image_path, audio_path, video_path,
                     fal_key=c.fal, progress_cb=cb,
                 )
+                push_segment_video_to_storage(video_path)
                 render_status(i, "done")
             except Exception as e:
                 render_status(i, "error", msg=f"{type(e).__name__}")
@@ -451,7 +466,11 @@ def _do_refine_one_segment(i: int) -> None:
     audio_path = _audio_path_for(i)
 
     async def work():
-        if not audio_path.exists():
+        # Target segment: try storage first, regen as fallback. The button
+        # site already bumped a counter if needed, so by the time we're here
+        # the hash represents "what the user wants now" — and a Storage hit
+        # is bit-identical to whatever was approved earlier.
+        if not pull_segment_audio_from_storage(audio_path):
             await generate_tts(
                 text=segments[i]["text"], voice_id=char.voice.voice_id,
                 output_path=audio_path,
@@ -460,13 +479,15 @@ def _do_refine_one_segment(i: int) -> None:
                 similarity=char.voice.similarity,
                 style=char.voice.style, tempo=char.voice.tempo,
             )
+            push_segment_audio_to_storage(audio_path)
         # video path depends on audio bytes, so it can only be computed now
         video_path = _video_path_for(i)
         if video_path is None:
             raise RuntimeError("Audio missing after generation — bug?")
-        if not video_path.exists():
+        if not pull_segment_video_from_storage(video_path):
             await lipsync(char.image_path, audio_path, video_path,
                           fal_key=c.fal)
+            push_segment_video_to_storage(video_path)
 
         # Keep seg_audio_paths in sync so other pages can play this audio
         audio_paths = dict(st.session_state.get("seg_audio_paths") or {})
@@ -474,25 +495,23 @@ def _do_refine_one_segment(i: int) -> None:
         st.session_state.seg_audio_paths = audio_paths
 
         # Re-concat from current cached paths for every segment. Streamlit
-        # Cloud wipes the ephemeral disk on container restart (only final.mp4
-        # is stored in Supabase), so OTHER segments' audio/video files may
-        # be gone even though the project itself is healthy. Regenerate
-        # anything missing using each segment's CURRENT counter values, so
-        # the recovered files match what the user last approved as content.
-        # (V3 is non-deterministic so the new take won't sound bit-identical
-        # to the lost original, but it's the same approved text + settings.)
+        # Cloud wipes the ephemeral disk on container restart, so OTHER
+        # segments' audio/video files may be gone even though the project
+        # itself is healthy. Try Storage (bit-identical) first for each
+        # missing piece; only regenerate as a last resort.
         all_videos: list[Path] = []
-        recovered: list[int] = []
+        recovered_from_cloud: list[int] = []
+        recovered_via_regen: list[int] = []
         for j in range(len(segments)):
             vp = _video_path_for(j)
             if vp is not None and vp.exists():
                 all_videos.append(vp)
                 continue
 
-            # Need to recover. Generate audio if missing, then lipsync.
+            # Need to recover. Try Storage for audio + video first.
             j_char = cast[segments[j]["character"]]
             j_audio = _audio_path_for(j)
-            if not j_audio.exists():
+            if not pull_segment_audio_from_storage(j_audio):
                 await generate_tts(
                     text=segments[j]["text"],
                     voice_id=j_char.voice.voice_id,
@@ -502,24 +521,38 @@ def _do_refine_one_segment(i: int) -> None:
                     similarity=j_char.voice.similarity,
                     style=j_char.voice.style, tempo=j_char.voice.tempo,
                 )
+                push_segment_audio_to_storage(j_audio)
+                if j != i:
+                    recovered_via_regen.append(j + 1)
             j_video = _video_path_for(j)
             if j_video is None:
                 raise RuntimeError(
                     f"Segment #{j+1}: audio missing after recovery — bug?"
                 )
-            if not j_video.exists():
+            if not pull_segment_video_from_storage(j_video):
                 await lipsync(
                     j_char.image_path, j_audio, j_video, fal_key=c.fal,
                 )
+                push_segment_video_to_storage(j_video)
+                if j != i and j + 1 not in recovered_via_regen:
+                    recovered_via_regen.append(j + 1)
+            else:
+                if j != i:
+                    recovered_from_cloud.append(j + 1)
             all_videos.append(j_video)
-            if j != i:
-                recovered.append(j + 1)  # 1-indexed for the user-facing toast
 
-        if recovered:
+        if recovered_from_cloud:
             st.toast(
                 "Restored segment(s) "
-                + ", ".join(f"#{n}" for n in recovered)
-                + " from cache (deploy restart wiped local files)",
+                + ", ".join(f"#{n}" for n in recovered_from_cloud)
+                + " from cloud cache",
+                icon="☁️",
+            )
+        if recovered_via_regen:
+            st.toast(
+                "Re-rendered segment(s) "
+                + ", ".join(f"#{n}" for n in recovered_via_regen)
+                + " (no cloud cache hit)",
                 icon="♻️",
             )
 
