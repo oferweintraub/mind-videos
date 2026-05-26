@@ -468,21 +468,60 @@ def _do_refine_one_segment(i: int) -> None:
             await lipsync(char.image_path, audio_path, video_path,
                           fal_key=c.fal)
 
-        # Keep seg_audio_paths in sync so the review page can play this audio
+        # Keep seg_audio_paths in sync so other pages can play this audio
         audio_paths = dict(st.session_state.get("seg_audio_paths") or {})
         audio_paths[str(i)] = str(audio_path)
         st.session_state.seg_audio_paths = audio_paths
 
-        # Re-concat from current cached paths for every segment. Bail loudly
-        # if any segment is missing — refine assumes a prior full render.
+        # Re-concat from current cached paths for every segment. Streamlit
+        # Cloud wipes the ephemeral disk on container restart (only final.mp4
+        # is stored in Supabase), so OTHER segments' audio/video files may
+        # be gone even though the project itself is healthy. Regenerate
+        # anything missing using each segment's CURRENT counter values, so
+        # the recovered files match what the user last approved as content.
+        # (V3 is non-deterministic so the new take won't sound bit-identical
+        # to the lost original, but it's the same approved text + settings.)
         all_videos: list[Path] = []
+        recovered: list[int] = []
         for j in range(len(segments)):
             vp = _video_path_for(j)
-            if vp is None or not vp.exists():
-                raise RuntimeError(
-                    f"Segment #{j+1} has no cached video. Run a full render first."
+            if vp is not None and vp.exists():
+                all_videos.append(vp)
+                continue
+
+            # Need to recover. Generate audio if missing, then lipsync.
+            j_char = cast[segments[j]["character"]]
+            j_audio = _audio_path_for(j)
+            if not j_audio.exists():
+                await generate_tts(
+                    text=segments[j]["text"],
+                    voice_id=j_char.voice.voice_id,
+                    output_path=j_audio,
+                    elevenlabs_api_key=c.elevenlabs,
+                    stability=j_char.voice.stability,
+                    similarity=j_char.voice.similarity,
+                    style=j_char.voice.style, tempo=j_char.voice.tempo,
                 )
-            all_videos.append(vp)
+            j_video = _video_path_for(j)
+            if j_video is None:
+                raise RuntimeError(
+                    f"Segment #{j+1}: audio missing after recovery — bug?"
+                )
+            if not j_video.exists():
+                await lipsync(
+                    j_char.image_path, j_audio, j_video, fal_key=c.fal,
+                )
+            all_videos.append(j_video)
+            if j != i:
+                recovered.append(j + 1)  # 1-indexed for the user-facing toast
+
+        if recovered:
+            st.toast(
+                "Restored segment(s) "
+                + ", ".join(f"#{n}" for n in recovered)
+                + " from cache (deploy restart wiped local files)",
+                icon="♻️",
+            )
 
         final_path = episode_dir / "final.mp4"
         if final_path.exists():
