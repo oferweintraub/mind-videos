@@ -341,8 +341,17 @@ def _settings_drawer():
         if _expected_password() and st.session_state.get("authed"):
             st.divider()
             if st.button("Sign out", key="sb_signout", width="stretch"):
+                # Wipe session state AND drop ?p= from the URL — otherwise
+                # _gate() re-authenticates the user on the next rerun via the
+                # "project_id IS the access token" bypass branch, making the
+                # Sign-out button look like a no-op.
                 for k in list(st.session_state.keys()):
                     del st.session_state[k]
+                try:
+                    if "p" in st.query_params:
+                        del st.query_params["p"]
+                except Exception:
+                    pass
                 st.rerun()
 
 
