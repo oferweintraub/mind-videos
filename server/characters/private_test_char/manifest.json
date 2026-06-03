@@ -1,0 +1,16 @@
+{
+  "slug": "private_test_char",
+  "display_name": "Private Test",
+  "description": "A test private character",
+  "style": "lego",
+  "voice": {
+    "voice_id": "test_voice_2",
+    "voice_name": "Test Voice 2",
+    "stability": 0.5,
+    "similarity": 0.75,
+    "style": 0.5,
+    "tempo": 1.0
+  },
+  "image": "image.png",
+  "public": false
+}

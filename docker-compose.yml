@@ -1,0 +1,24 @@
+# Local dev/run convenience — builds the same image GCP runs and starts it on
+# http://localhost:8080.
+#
+#   docker compose up --build      # build + run (foreground)
+#   docker compose up -d           # run in background
+#   docker compose logs -f         # follow logs
+#   docker compose down            # stop & remove
+#
+# API keys come from .env (git-ignored). The two volume mounts keep rendered
+# videos and newly-created characters on your Mac instead of inside the
+# throwaway container.
+
+services:
+  mind-video:
+    build: .
+    image: mind-video
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - ./server/episodes:/app/server/episodes
+      - ./server/characters:/app/server/characters
+    restart: unless-stopped

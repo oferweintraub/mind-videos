@@ -1,0 +1,75 @@
+# Cloud Build → Artifact Registry → Cloud Run.
+#
+# Manual run:
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --substitutions=_REGION=me-west1,_REPO=mind-video,_SERVICE=mind-video
+#
+# Or wire it to a trigger on push to master.
+#
+# Secrets (FAL_KEY, ELEVENLABS_API_KEY, GOOGLE_API_KEY) are NOT baked in —
+# they are bound from Secret Manager by the deploy step below. Create them once:
+#   printf '%s' "$FAL_KEY" | gcloud secrets create FAL_KEY --data-file=-
+#   (repeat for ELEVENLABS_API_KEY, GOOGLE_API_KEY)
+
+substitutions:
+  _REGION: me-west1
+  _REPO: mind-video
+  _SERVICE: mind-video
+
+images:
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA"
+
+steps:
+  # Build (with cache from :latest when present).
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}"
+        docker pull "$IMG:latest" || true
+        docker build \
+          --cache-from "$IMG:latest" \
+          -t "$IMG:$SHORT_SHA" \
+          -t "$IMG:latest" .
+
+  # Push both tags.
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        IMG="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}"
+        docker push "$IMG:$SHORT_SHA"
+        docker push "$IMG:latest"
+
+  # Deploy to Cloud Run.
+  #   --no-cpu-throttling + --min-instances=1 : keep the instance (and its
+  #     in-memory job registry + background render subprocess) alive between
+  #     requests. --max-instances=1 : job state lives in one process.
+  #   --timeout=3600 : a full render can take minutes.
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --port=8080
+      - --cpu=2
+      - --memory=2Gi
+      - --timeout=3600
+      - --no-cpu-throttling
+      - --min-instances=1
+      - --max-instances=1
+      - --set-secrets=FAL_KEY=FAL_KEY:latest,ELEVENLABS_API_KEY=ELEVENLABS_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest
+
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY

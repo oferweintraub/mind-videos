@@ -1,0 +1,42 @@
+# --- VCS / tooling ---
+.git
+.gitignore
+.claude
+.streamlit
+*.md
+!server/**/*.md
+
+# --- Python caches & local envs (image installs its own) ---
+**/__pycache__/
+**/*.py[cod]
+venv/
+.venv/
+**/.mypy_cache/
+**/.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Node (frontend rebuilt in the build stage) ---
+**/node_modules/
+frontend/dist/
+
+# --- Secrets & local config (injected via Cloud Run env / Secret Manager) ---
+.env
+.env.*
+frontend/.env
+frontend/.env.*
+**/users.json
+
+# --- Generated / heavy media (recreated at runtime) ---
+output/
+server/episodes/*/audio/
+server/episodes/*/videos/
+server/episodes/*/final.mp4
+examples/
+assets/
+
+# --- OS / editor cruft ---
+**/.DS_Store
+Thumbs.db
+*.log
+*.swp

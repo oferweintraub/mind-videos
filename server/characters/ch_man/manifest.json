@@ -1,0 +1,15 @@
+{
+  "slug": "ch_man",
+  "display_name": "Chung",
+  "description": "A chinese old man",
+  "style": "comic",
+  "voice": {
+    "voice_id": "11",
+    "voice_name": "laura",
+    "stability": 0.5,
+    "similarity": 0.75,
+    "style": 0.5,
+    "tempo": 1.25
+  },
+  "image": "image.png"
+}

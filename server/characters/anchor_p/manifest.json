@@ -1,0 +1,16 @@
+{
+  "slug": "anchor_p",
+  "display_name": "blondee2",
+  "description": "\nBlonde young women long hair",
+  "style": "comic",
+  "voice": {
+    "voice_id": "11",
+    "voice_name": "Laura",
+    "stability": 0.5,
+    "similarity": 0.75,
+    "style": 0.5,
+    "tempo": 1.0
+  },
+  "image": "image.png",
+  "public": false
+}

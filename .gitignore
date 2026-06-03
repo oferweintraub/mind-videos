@@ -1,6 +1,9 @@
 # Environment
 .env
 .env.local
+
+# Auth store (server.py writes hashed credentials here)
+users.json
 venv/
 .venv/
 __pycache__/
@@ -52,6 +55,10 @@ episodes/*/final.mp4
 
 # Character candidate work area (regeneratable, can be huge)
 characters/_candidates/
+
+# React frontend artifacts
+frontend/node_modules/
+frontend/dist/
 
 # Claude Code ephemeral worktrees
 .claude/worktrees/

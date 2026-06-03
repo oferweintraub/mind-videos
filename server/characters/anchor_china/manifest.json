@@ -1,0 +1,15 @@
+{
+  "slug": "anchor_china",
+  "display_name": "_dafne",
+  "description": "A young adukt chinese girl",
+  "style": "comic",
+  "voice": {
+    "voice_id": "11",
+    "voice_name": "Charlie",
+    "stability": 0.5,
+    "similarity": 0.75,
+    "style": 0.5,
+    "tempo": 1.25
+  },
+  "image": "image.png"
+}
