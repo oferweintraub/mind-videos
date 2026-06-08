@@ -1,0 +1,16 @@
+{
+  "slug": "amirs",
+  "display_name": "מנחה_חדשות",
+  "description": "כמו בתמונה המצורפת",
+  "style": "south_park",
+  "voice": {
+    "voice_id": "21m00Tcm4TlvDq8ikWAM",
+    "voice_name": "צ׳ארלי",
+    "stability": 0.5,
+    "similarity": 0.75,
+    "style": 0.5,
+    "tempo": 1.25
+  },
+  "image": "image.png",
+  "public": true
+}

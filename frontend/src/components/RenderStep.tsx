@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSelector } from "react-redux";
 import type { AppState, APIKeys } from "../types";
 import { estimateEpisode, safeSlug } from "../utils";
@@ -13,6 +13,7 @@ type RenderStepProps = {
   onBack: () => void;
   onVoiceCloned?: (slug: string, clonedVoiceId: string) => void;
   onRenderComplete: (slug: string, videoPath: string) => void;
+  onNewProject: () => void;
 };
 
 type JobStatus = {
@@ -23,19 +24,96 @@ type JobStatus = {
   final_path?: string;
 };
 
-export function RenderStep({ state, onBack, onVoiceCloned, onRenderComplete }: RenderStepProps) {
+export function RenderStep({ state, onBack, onVoiceCloned, onRenderComplete, onNewProject }: RenderStepProps) {
   const { t } = useI18n();
   const apiKeys = useSelector((s: RootState) => s.settings.apiKeys) as APIKeys;
-  const [phase, setPhase] = useState<"preflight" | "running">("preflight");
+  const [phase, setPhase] = useState<"preflight" | "running" | "done">(
+    state.result ? "done" : "preflight",
+  );
   const [progress, setProgress] = useState(0);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
+  const downloadVideo = async () => {
+    if (!videoUrl || downloading) return;
+    setDownloading(true);
+    try {
+      const resp = await fetch(videoUrl);
+      if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
+      const blob = await resp.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const filename = `${safeSlug(state.result?.title || state.title || "video")}.mp4`;
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      setRenderError(String(err));
+    } finally {
+      setDownloading(false);
+    }
+  };
   const summary = estimateEpisode(state.segments);
-  const missingKeys = [
-    !apiKeys.fal && "fal.ai",
-    !apiKeys.elevenlabs && "ElevenLabs",
-  ].filter(Boolean);
+
+  // Real ElevenLabs voice IDs are 20-char base62 strings. Anything else
+  // (e.g. "john", "11", "") 404s at TTS and fails the whole render.
+  const VOICE_ID_RE = /^[A-Za-z0-9]{20}$/;
+
+  // Preflight validation — a list of things to fix before spending money on a
+  // render. `errors` block the Generate button; `warnings` are advisory.
+  const { errors, warnings } = useMemo(() => {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const castBySlug = Object.fromEntries(state.cast.map((c) => [c.slug, c]));
+
+    if (!state.title.trim()) errors.push("Give the video a name — the title is empty.");
+    if (state.segments.length === 0) errors.push("Add at least one segment to the script.");
+    if (!apiKeys.fal) errors.push("Add your fal.ai API key in Settings.");
+    if (!apiKeys.elevenlabs) errors.push("Add your ElevenLabs API key in Settings.");
+
+    const usedSlugs = new Set<string>();
+    state.segments.forEach((seg, i) => {
+      const n = i + 1;
+      const isScene = seg.kind === "scene";
+      if (!seg.character) {
+        errors.push(`Segment ${n}: no character assigned.`);
+      } else if (!castBySlug[seg.character]) {
+        errors.push(`Segment ${n}: character “${seg.character}” isn’t in your cast.`);
+      } else {
+        usedSlugs.add(seg.character);
+      }
+      if (!seg.text.trim()) {
+        errors.push(`Segment ${n}: ${isScene ? "scene narration" : "dialogue"} is empty.`);
+      }
+      if (isScene && !(seg.animationPrompt || "").trim()) {
+        errors.push(`Segment ${n}: the scene needs an animation description.`);
+      }
+    });
+
+    usedSlugs.forEach((slug) => {
+      const c = castBySlug[slug];
+      if (!c) return;
+      const hasSample = !!state.voiceSamples[slug];
+      if (!hasSample) {
+        const vid = (c.voiceId || "").trim();
+        if (!vid) {
+          errors.push(`${c.displayName}: no voice selected — pick one from the voice dropdown.`);
+        } else if (!VOICE_ID_RE.test(vid)) {
+          errors.push(`${c.displayName}: “${vid}” isn’t a valid ElevenLabs voice id — pick a voice from the dropdown.`);
+        }
+      }
+      if (!c.imageUrl) warnings.push(`${c.displayName}: has no image.`);
+    });
+
+    return { errors, warnings };
+  }, [state, apiKeys]);
+
+  const canRender = errors.length === 0;
 
   const startRender = async () => {
     setRenderError(null);
@@ -77,20 +155,7 @@ export function RenderStep({ state, onBack, onVoiceCloned, onRenderComplete }: R
 
       // First: save the script
       const scriptContent = `# ${state.title || "Untitled"}\n\n${state.segments
-        .map((seg) => {
-          // Strip newlines/parens from heading annotations so the `## slug (key: value)`
-          // line stays single-line and parseable.
-          const clean = (s?: string) => (s ?? "").replace(/[\r\n)]/g, " ").trim();
-          let heading = `## ${seg.character}`;
-          if (seg.kind === "scene") {
-            const anim = clean(seg.animationPrompt);
-            if (anim) heading += ` (anim: ${anim})`;
-          } else {
-            const bg = clean(seg.background);
-            if (bg) heading += ` (bg: ${bg})`;
-          }
-          return `${heading}\n${seg.text}`;
-        })
+        .map((seg) => `## ${seg.character}\n${seg.text}`)
         .join("\n\n")}`;
       const scriptResp = await fetch(API.script.create, {
         method: "POST",
@@ -138,9 +203,12 @@ export function RenderStep({ state, onBack, onVoiceCloned, onRenderComplete }: R
           setProgress(Math.min(95, 40 + Math.random() * 40));
         } else if (job.status === "done") {
           setProgress(100);
-          // Advance to the Preview step (5). The parent stores the video URL
-          // on state.result so PreviewStep can render it.
-          onRenderComplete(job.slug, job.final_path ? getStaticUrl(job.final_path) : "");
+          if (job.final_path) {
+            const videoPath = getStaticUrl(job.final_path);
+            setVideoUrl(videoPath);
+            onRenderComplete(job.slug, videoPath);
+          }
+          setPhase("done");
           window.clearInterval(interval);
         } else if (job.status === "error") {
           setRenderError(job.error || "Unknown error");
@@ -155,6 +223,58 @@ export function RenderStep({ state, onBack, onVoiceCloned, onRenderComplete }: R
     }, 1000);
     return () => window.clearInterval(interval);
   }, [phase, jobId, onRenderComplete]);
+
+  if (phase === "done") {
+    return (
+      <div>
+        <h2>{t("isReady", { title: state.result?.title || state.title || t("untitled") })}</h2>
+        <p className="muted">{t("watchPreview")}</p>
+        <div className="video-preview">
+          {videoUrl ? (
+            <video
+              className="videoPreview"
+              key={videoUrl}
+              width="100%"
+              height="auto"
+              controls
+              autoPlay
+            >
+              <source src={videoUrl} type="video/mp4" />
+              {t("videoNotSupported")}
+            </video>
+          ) : (
+            <div className="video-placeholder">{t("videoLoading")}</div>
+          )}
+        </div>
+        <div className="summary-row">
+          <div className="card small-card">
+            <p className="tiny">{t("renderedIn")}</p>
+            <h2>{Math.floor((state.result?.elapsed ?? 0) / 60)}m {(state.result?.elapsed ?? 0) % 60}s</h2>
+          </div>
+          <div className="card small-card">
+            <p className="tiny">{t("spent")}</p>
+            <h2>${(state.result?.cost ?? 0).toFixed(2)}</h2>
+          </div>
+        </div>
+        <div className="footer-row">
+          <button type="button" className="secondary" onClick={onBack}>
+            {t("editScript")}
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={downloadVideo}
+            disabled={!videoUrl || downloading}
+          >
+            {downloading ? t("downloading") : t("downloadVideo")}
+          </button>
+          <button type="button" className="primary" onClick={onNewProject}>
+            {t("startNewProjectButton")}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (phase === "running") {
     return (
@@ -205,11 +325,29 @@ export function RenderStep({ state, onBack, onVoiceCloned, onRenderComplete }: R
         </p>
       </div>
       {renderError && <div className="warning-card">{renderError}</div>}
-      {missingKeys.length > 0 ? (
-        <div className="warning-card">
-          {t("missingKeysPrefix")} {missingKeys.join(" and ")} {t("missingKeysSuffix")}
+
+      {errors.length > 0 && (
+        <div className="warning-card" style={{ borderLeft: "4px solid #dc2626" }}>
+          <strong>Fix {errors.length === 1 ? "this" : `these ${errors.length} things`} before generating:</strong>
+          <ul style={{ margin: "8px 0 0", paddingInlineStart: 20 }}>
+            {errors.map((msg, i) => (
+              <li key={i} style={{ marginBottom: 4 }}>❌ {msg}</li>
+            ))}
+          </ul>
         </div>
-      ) : null}
+      )}
+
+      {warnings.length > 0 && (
+        <div className="info-card" style={{ marginTop: 12, padding: 14, backgroundColor: "#fffbeb", borderRadius: 10, borderLeft: "4px solid #f59e0b" }}>
+          <strong>Heads up:</strong>
+          <ul style={{ margin: "8px 0 0", paddingInlineStart: 20 }}>
+            {warnings.map((msg, i) => (
+              <li key={i} style={{ marginBottom: 4 }}>⚠️ {msg}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="footer-row">
         <button type="button" className="secondary" onClick={onBack}>
           {t("editScript")}
@@ -217,10 +355,13 @@ export function RenderStep({ state, onBack, onVoiceCloned, onRenderComplete }: R
         <button
           type="button"
           className="primary"
-          disabled={missingKeys.length > 0 || state.segments.length === 0}
+          disabled={!canRender}
+          title={canRender ? undefined : "Resolve the items above first"}
           onClick={startRender}
         >
-          Generate lip-synced video · ${summary.cost_usd.toFixed(2)}
+          {canRender
+            ? `Generate lip-synced video · $${summary.cost_usd.toFixed(2)}`
+            : `Fix ${errors.length} item${errors.length === 1 ? "" : "s"} to continue`}
         </button>
       </div>
     </div>

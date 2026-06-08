@@ -60,15 +60,18 @@ put_secret FAL_KEY            "${FAL_KEY:-}"
 put_secret ELEVENLABS_API_KEY "${ELEVENLABS_API_KEY:-}"
 put_secret GOOGLE_API_KEY     "${GOOGLE_API_KEY:-}"
 
-# Let the Cloud Run runtime service account read the secrets.
-PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
-RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+# Dedicated, minimal runtime service account for Cloud Run. We do NOT use the
+# default compute SA: it only exists if the Compute Engine API is enabled and
+# it carries broad Editor rights. This SA only gets to read the three secrets.
+RUNTIME_SA="${RUNTIME_SA_NAME:-mind-video-run}@${PROJECT_ID}.iam.gserviceaccount.com"
+echo "==> Ensuring runtime service account ${RUNTIME_SA} exists..."
+gcloud iam service-accounts describe "${RUNTIME_SA}" >/dev/null 2>&1 \
+  || gcloud iam service-accounts create "${RUNTIME_SA_NAME:-mind-video-run}" \
+       --display-name="Mind Video Cloud Run runtime"
+
 echo "==> Granting ${RUNTIME_SA} secretAccessor..."
-for s in FAL_KEY ELEVENLABS_API_KEY GOOGLE_API_KEY; do
-  gcloud secrets describe "${s}" >/dev/null 2>&1 && \
-  gcloud secrets add-iam-policy-binding "${s}" \
-    --member="serviceAccount:${RUNTIME_SA}" \
-    --role="roles/secretmanager.secretAccessor" >/dev/null
-done
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role="roles/secretmanager.secretAccessor" --quiet >/dev/null
 
 echo "==> Setup complete. Next: ./deploy/deploy.sh"

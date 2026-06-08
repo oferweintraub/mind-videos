@@ -2,6 +2,7 @@
   color-scheme: dark;
   --bg: #08192e;
   --surface: #0f2a4d;
+  --surface-blur: #10404d; /* for frosted-glass effects */
   --surface-2: #14385f;
   --text: #e7f1ff;
   --muted: #8fb4d8;
@@ -50,7 +51,15 @@ button.primary {
 }
 
 button.secondary {
-  background: rgba(255,255,255,0.05);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  cursor: pointer;
+  outline: none;
+
+}
+
+button.logout {
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text);
 }
 
@@ -70,7 +79,6 @@ button.destructive {
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1.5rem;
-  padding: 1rem 1.25rem;
   background: rgba(23, 31, 45, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius);
@@ -92,7 +100,7 @@ button.destructive {
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   width: auto;
-  height:1rem;
+  height: 3rem;
   border-radius: 0.5rem;
   display: grid;
   place-items: center;
@@ -134,9 +142,8 @@ button.destructive {
   gap: 1rem;
 }
 
-.topbar-actions{
+.topbar-actions {
   display: flex;
-  align-items: center;
   gap: 1rem;
 }
 
@@ -171,7 +178,7 @@ button.destructive {
 }
 
 .field-group input {
-  background: rgba(255,255,255,0.04);
+  background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
   border-radius: 12px;
   color: var(--text);
@@ -198,15 +205,18 @@ button.destructive {
 }
 
 .content {
-  padding: 2rem;
+  padding: 1rem;
+  min-height: 100%;
+  height: 100%;
 }
 
 .page-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   justify-content: space-between;
   align-items: flex-end;
   gap: 1rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.5rem;
 }
 
 .topbar .page-header {
@@ -214,8 +224,24 @@ button.destructive {
   align-items: center;
 }
 
+.page-subtitle {
+  grid-column: 2;
+  font-size: 1.8rem;
+}
+
 .topbar .page-header h1 {
   margin: 0;
+}
+
+.unselectable {
+  -webkit-user-select: none;
+  /* Safari */
+  -moz-user-select: none;
+  /* Older Firefox */
+  -ms-user-select: none;
+  /* Internet Explorer/Edge */
+  user-select: none;
+  /* Standard syntax */
 }
 
 .eyebrow {
@@ -224,6 +250,13 @@ button.destructive {
   letter-spacing: 0.16em;
   font-size: 0.78rem;
   color: var(--accent);
+  grid-column: 1;
+}
+
+.eyebrow.logo {
+  font-size: 2rem;
+  letter-spacing: 0.12em;
+  outline: none;
 }
 
 .page-title-row {
@@ -241,12 +274,56 @@ button.destructive {
   color: var(--muted);
 }
 
+.voice-options {
+  height: 10rem;
+  overflow: auto;
+  background-color: var(--surface);
+}
+
+.play-button {
+  background: transparent;
+  flex: "0 0 auto";
+  width: 28;
+  height: 28;
+  border-radius: "50%";
+  border: "1px solid var(--border, #ddd)";
+  background: "#fff";
+  cursor: "pointer";
+  opacity:1;
+  line-height: 1;
+}
+
+.voice-option {
+  position: relative;
+  z-index: 20;
+  left: 0px;
+  right: 0px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: none;
+  border-radius: 6px;
+  margin-top: 4px;
+  background: transparent;
+  color: white;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+}
+
+.voice-option:nth-child(odd) {
+  background-color: var(--surface-blur);
+}
+
 /* Workspace = vertical step rail + active step panel, side by side */
 .workspace {
   display: flex;
   align-items: flex-start;
   gap: 1.5rem;
-  height: 80vh;
+  height: 100%;
+}
+
+.characterDescriptionInfo {
+  display: grid;
+  grid-template-columns: 50% 50%;
+  gap: 0.5rem;
 }
 
 .step-rail {
@@ -279,7 +356,7 @@ button.destructive {
 .step-rail-toggle:hover {
   background: rgba(255, 255, 255, 0.08);
 }
-  
+
 
 .step-rail-list {
   list-style: none;
@@ -368,9 +445,19 @@ button.destructive {
 .empty-state-grid,
 .cards-grid {
   display: flex;
-  width: 50rem;
   height: auto;
   gap: 1rem;
+}
+
+.space-holder {
+  height: 5rem;
+}
+
+.cast-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr 3fr 5fr 17fr 5fr;
+  gap: 1rem;
+  
 }
 
 .empty-state-grid {
@@ -435,6 +522,7 @@ button.destructive {
 .candidate-card.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px rgba(232, 177, 79, 0.25);
+  width: 10rem;
 }
 
 .candidate-caption {
@@ -469,7 +557,7 @@ button.destructive {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255,255,255,0.04);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   padding: 0.85rem;
 }
@@ -490,16 +578,21 @@ button.destructive {
   align-items: center;
 }
 
+/*rgba(23, 31, 45, 0.92);*/
 .footer-row {
+  background: transparent;
+  position: fixed;
+  bottom: 0rem;
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  width: 80vw
-
+  width: calc(100% - 5fr);
+  height: 4rem;
+  padding: 0.5rem 1rem;
 }
 
 .script-summary {
- height: 55vh;
+  height: 55vh;
 }
 
 .script-main-container {
@@ -548,7 +641,7 @@ button.destructive {
   min-width: 8rem;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255,255,255,0.04);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   padding: 0.85rem;
 }
@@ -557,7 +650,7 @@ button.destructive {
   flex: 1 1 100%;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255,255,255,0.04);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   padding: 0.85rem;
 }
@@ -732,7 +825,7 @@ button.destructive {
 
 .progress-bar {
   height: 1rem;
-  background: rgba(255,255,255,0.08);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 999px;
   overflow: hidden;
   margin-bottom: 0.75rem;
@@ -760,7 +853,7 @@ button.destructive {
 .video-placeholder {
   min-height: 320px;
   border-radius: var(--radius);
-  background: linear-gradient(135deg, rgba(15,23,42,0.8), rgba(23,31,45,0.95));
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(23, 31, 45, 0.95));
   border: 1px solid var(--border);
   display: grid;
   place-items: center;
@@ -783,9 +876,11 @@ button.destructive {
   .app-shell {
     grid-template-columns: 1fr;
   }
+
   .script-layout {
     grid-template-columns: 1fr;
   }
+
   .empty-state-grid,
   .cards-grid {
     grid-template-columns: 1fr;
@@ -794,7 +889,7 @@ button.destructive {
 
 .videoPreview {
   width: auto;
-  height:50rem;
+  height: 50rem;
   margin: auto;
   border-radius: var(--radius);
 }
@@ -837,7 +932,7 @@ button.destructive {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255,255,255,0.04);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   padding: 0.85rem;
 }

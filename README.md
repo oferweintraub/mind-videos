@@ -327,6 +327,56 @@ Opens at `http://localhost:8501`.
 
 ---
 
+## Running the web app (server + frontend)
+
+The project also ships a web app: a **FastAPI backend** in [`server/`](server/) (TTS + lip-sync pipeline, character/voice/render APIs) and a **React frontend** in [`frontend/`](frontend/). There are two ways to run it.
+
+You'll need your API keys in a `.env` file at the repo root (see [Step 5](#step-5--add-your-api-keys-to-the-project)) and **ffmpeg** installed ([Step 2](#step-2--install-the-prerequisites)).
+
+### Option A — Docker (simplest, one command)
+
+Builds the frontend and serves it together with the backend in a single container. Requires [Docker](https://www.docker.com/products/docker-desktop/).
+
+```bash
+docker compose up --build
+```
+
+Open **`http://localhost:8080`**. Stop with `docker compose down`. Your `.env` keys are picked up automatically, and rendered videos / new characters persist to `server/episodes` and `server/characters` on your machine.
+
+### Option B — Local dev (two processes, hot reload)
+
+Use this when editing the code. Run the **backend** and **frontend** in two terminals.
+
+**1. Backend** (from the repo root):
+
+```bash
+python3 -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
+pip install -r server/requirements.txt
+uvicorn server:app --reload --port 8000
+```
+
+The API now runs at `http://localhost:8000`.
+
+**2. Frontend** (in a second terminal):
+
+```bash
+cd frontend
+npm install
+echo "VITE_SERVER_URL=http://localhost:8000" > .env   # point the dev proxy at the backend
+npm run dev
+```
+
+Open the URL Vite prints (usually **`http://localhost:5173`**). The dev server proxies API calls to the backend on port 8000, so the two run as one app in the browser.
+
+> The `VITE_SERVER_URL` must match the backend port. In the Docker build the frontend talks to the same origin that serves it, so no proxy is needed there.
+
+### Deploying to the cloud
+
+To put the web app on **Google Cloud Run**, see [`docs/DEPLOY-GCP.md`](docs/DEPLOY-GCP.md) — `./deploy/setup.sh` (one-time) then `./deploy/deploy.sh`.
+
+---
+
 ## How it works (under the hood)
 
 ```

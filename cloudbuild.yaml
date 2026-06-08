@@ -61,6 +61,7 @@ steps:
       - --region=${_REGION}
       - --platform=managed
       - --allow-unauthenticated
+      - --service-account=mind-video-run@$PROJECT_ID.iam.gserviceaccount.com
       - --port=8080
       - --cpu=2
       - --memory=2Gi

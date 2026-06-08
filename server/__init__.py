@@ -347,6 +347,22 @@ def characters_create(body: CharacterBody):
     if not image_bytes:
         raise HTTPException(400, "image_base64 is empty")
 
+    # Normalize to a real PNG. Users may upload JPEG/WebP; writing those bytes
+    # to a file named image.png leaves a misnamed file that can break the
+    # downstream lipsync image upload. Re-encode via Pillow so image.png is
+    # always genuinely PNG (and RGB, dropping any alpha that trips encoders).
+    import io
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            im = im.convert("RGB")
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+            image_bytes = buf.getvalue()
+    except Exception as e:
+        raise HTTPException(400, f"could not decode image: {e}")
+
     char_dir = CHARACTERS_DIR / body.slug
     char_dir.mkdir(parents=True, exist_ok=True)
     (char_dir / "image.png").write_bytes(image_bytes)
@@ -599,6 +615,123 @@ async def characters_generate(body: GenerateCandidatesBody):
         out.append({"idx": i, "image_url": url})
 
     return {"candidates": out}
+
+
+# ---------------------------------------------------------------------------
+# Voice catalog (stock ElevenLabs voices) — backs the searchable voice picker
+# ---------------------------------------------------------------------------
+
+VOICES_PATH = SERVER_ROOT / "config" / "voices.yaml"
+VOICE_PREVIEWS_DIR = SERVER_ROOT / "config" / "voice_previews"
+
+if VOICE_PREVIEWS_DIR.is_dir():
+    app.mount(
+        "/static/voice_previews",
+        StaticFiles(directory=str(VOICE_PREVIEWS_DIR)),
+        name="voice-previews",
+    )
+
+
+def _load_catalog_voices() -> tuple[list[dict], dict]:
+    """Stock voices from config/voices.yaml."""
+    import yaml  # pyyaml is already a dependency
+
+    if not VOICES_PATH.exists():
+        return [], {}
+    try:
+        data = yaml.safe_load(VOICES_PATH.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as e:
+        raise HTTPException(500, f"voices.yaml is not valid YAML: {e}")
+    voices = []
+    for v in data.get("voices", []) or []:
+        vid = v.get("id", "")
+        # Pre-generated Hebrew preview clips ship in config/voice_previews/<id>.mp3
+        preview = (
+            f"/static/voice_previews/{vid}.mp3"
+            if vid and (VOICE_PREVIEWS_DIR / f"{vid}.mp3").is_file()
+            else ""
+        )
+        voices.append({
+            "id": vid,
+            "name": v.get("name", ""),
+            "tone": v.get("tone", ""),
+            "good_for": v.get("good_for", []) or [],
+            "source": "catalog",
+            "category": "premade",
+            "preview_url": preview,
+        })
+    return voices, data.get("defaults", {})
+
+
+async def _fetch_account_voices() -> list[dict]:
+    """Live voices from the ElevenLabs account (incl. cloned). Empty on any error."""
+    import os as _os
+    import httpx
+
+    api_key = (_os.environ.get("ELEVENLABS_API_KEY") or "").strip()
+    if not api_key:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://api.elevenlabs.io/v1/voices",
+                headers={"xi-api-key": api_key},
+            )
+    except httpx.HTTPError:
+        return []
+    if resp.status_code >= 400:
+        return []
+
+    out = []
+    for v in resp.json().get("voices", []) or []:
+        labels = v.get("labels") or {}
+        tone = ", ".join(
+            str(labels[k]) for k in ("accent", "age", "gender", "description", "use_case")
+            if labels.get(k)
+        )
+        out.append({
+            "id": v.get("voice_id", ""),
+            "name": v.get("name", ""),
+            "tone": tone,
+            "good_for": [v.get("category")] if v.get("category") else [],
+            "source": "account",
+            "category": v.get("category", ""),  # cloned | premade | generated | professional
+            "preview_url": v.get("preview_url", "") or "",
+        })
+    return out
+
+
+@app.get("/voices")
+async def list_voices():
+    """Stock catalog (config/voices.yaml) merged with live ElevenLabs account
+    voices (including cloned). Deduped by id; the catalog's richer description
+    wins, but the account category is preserved so cloned voices are findable.
+    """
+    catalog, defaults = _load_catalog_voices()
+    account = await _fetch_account_voices()
+
+    by_id: dict[str, dict] = {}
+    for v in catalog:
+        if v["id"]:
+            by_id[v["id"]] = v
+    for v in account:
+        if not v["id"]:
+            continue
+        if v["id"] in by_id:
+            # keep the catalog description, but carry over the live category
+            # and a preview if the catalog didn't ship one.
+            by_id[v["id"]]["category"] = v["category"] or by_id[v["id"]]["category"]
+            if not by_id[v["id"]].get("preview_url"):
+                by_id[v["id"]]["preview_url"] = v.get("preview_url", "")
+        else:
+            by_id[v["id"]] = v
+
+    # Cloned voices first (most relevant to the user), then the rest by name.
+    voices = sorted(
+        by_id.values(),
+        key=lambda v: (v.get("category") != "cloned", v.get("name", "").lower()),
+    )
+    return {"voices": voices, "defaults": defaults}
 
 
 # ---------------------------------------------------------------------------

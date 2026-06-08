@@ -23,17 +23,17 @@ one port. One URL, one origin, no CORS to manage.
 | `Dockerfile` | Multi-stage build (node → vite build; python + ffmpeg → runtime) |
 | `.dockerignore` | Keeps `node_modules`, venv, secrets, generated media out of the context |
 | `deploy/setup.sh` | One-time: enable APIs, create Artifact Registry repo + Secret Manager secrets |
-| `deploy/deploy.sh` | Build via Cloud Build + deploy to Cloud Run |
-| `cloudbuild.yaml` | Same flow as a Cloud Build config (for CI triggers) |
+| `deploy/deploy.sh` | Build the image **locally** with Docker, push to Artifact Registry, deploy to Cloud Run |
+| `cloudbuild.yaml` | Cloud Build alternative (CI triggers) — only if your account can use Cloud Build (see note below) |
 
 ## One-time setup
 
 ```bash
 gcloud auth login
-gcloud config set project <YOUR_PROJECT_ID>
+gcloud config set project <YOUR_PROJECT_ID>   # the project ID, not its number
 
-# Enables APIs, creates the 'mind-video' Artifact Registry repo, and loads
-# FAL_KEY / ELEVENLABS_API_KEY / GOOGLE_API_KEY into Secret Manager.
+# Enables APIs (incl. Artifact Registry), creates the 'mind-video' repo, and
+# loads FAL_KEY / ELEVENLABS_API_KEY / GOOGLE_API_KEY into Secret Manager.
 # Reads the keys from your local .env if present.
 ./deploy/setup.sh
 ```
@@ -45,11 +45,21 @@ gcloud config set project <YOUR_PROJECT_ID>
 # prints the public https URL when finished
 ```
 
-Or via Cloud Build (e.g. from a push trigger):
+`deploy.sh` builds the image locally for `linux/amd64` (Cloud Run's arch — note
+your Mac is arm64, so this cross-build matters) and pushes it straight to
+Artifact Registry, then runs `gcloud run deploy --image`.
 
-```bash
-gcloud builds submit --config cloudbuild.yaml
-```
+### Why local build instead of Cloud Build?
+
+`gcloud builds submit` stages your source in a `gs://<project>_cloudbuild`
+bucket. On org-restricted accounts that fails with:
+
+> The user is forbidden from accessing the bucket [..._cloudbuild] … missing
+> the "serviceusage.services.use" permission.
+
+Building locally and pushing the finished image to Artifact Registry sidesteps
+the staging bucket entirely, so it works regardless of that org policy. If your
+account *can* use Cloud Build, `cloudbuild.yaml` does the same flow server-side.
 
 ## Why the Cloud Run flags matter
 

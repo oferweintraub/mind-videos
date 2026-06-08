@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
-  const target = env.VITE_SERVER_URL || "http://localhost:8000";
+  const target = "http://localhost:8000";//env.VITE_SERVER_URL || "http://localhost:8000";
   return {
     plugins: [react()],
     server: {
@@ -15,6 +15,9 @@ export default defineConfig(({ mode }) => {
         "/jobs": target,
         "/static": target,
         "/home": target,
+        "/voices": target,
+        "/videos": target,
+        "/clone-voice": target,
       },
     },
   };

@@ -23,6 +23,8 @@ import {
   downloadEncryptedSettingsFile,
 } from "./utils/cryptoUtils";
 import { useI18n } from "./i18n/I18nProvider";
+import { Icon } from 'react-icons-kit'
+import {cog} from 'react-icons-kit/fa/cog'
 
 const STORAGE_KEY = "mind-video-app-state";
 
@@ -347,25 +349,19 @@ function App() {
   return (
     <div className="app-shell">
       <main className="content">
-        <div className="topbar">
+        <div className="topbar unselectable">
           <header className="page-header">
-            <div>
-              <p className="eyebrow">🎬 {t("appName")}</p>
-              <h1>{t("appSubtitle")}</h1>
-            </div>
+              <p className="eyebrow logo">🎬 {t("appName")}</p>
+              <p className="page-subtitle">{t("appSubtitle")}</p>
           </header>
           <div className="topbar-labels">
-            <p className="eyebrow">{t("signedInAs")}</p>
             <div className="topbar-user">{state.authUser?.email || t("unknownUser")}</div>
           </div>
           <div className="topbar-actions">
             <button type="button" className="icon-button" onClick={toggleSettings} aria-label={t("openSettings")}> 
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09c.12-.38.35-.73.67-1.01A1.65 1.65 0 0 0 5.6 8.6a1.65 1.65 0 0 0 .33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09c.12.38.35.73.67 1.01a1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09c-.12.38-.35.73-.67 1.01z" />
-            </svg>
+            <Icon icon={cog} size={20} />
           </button>
-            <button type="button" className="secondary" onClick={logoutUser}>
+            <button type="button" className="logout unselectable" onClick={logoutUser}>
               {t("logout")}
             </button>
           </div>
@@ -415,6 +411,7 @@ function App() {
               onBack={() => setStep(3)}
               onVoiceCloned={updateVoiceSampleClonedId}
               onRenderComplete={completeRender}
+              onNewProject={resetProject}
             />
           )}
           {state.step === 5 && (

@@ -86,7 +86,21 @@ async def generate_tts(
                     },
                 },
             )
-            r.raise_for_status()
+            if r.status_code == 404:
+                raise RuntimeError(
+                    f"ElevenLabs has no voice with id '{voice_id}'. Edit this "
+                    f"character and pick a voice from the dropdown (or paste a "
+                    f"valid ElevenLabs voice id)."
+                )
+            if r.status_code == 401:
+                raise RuntimeError(
+                    "ElevenLabs rejected the API key (401). Check ELEVENLABS_API_KEY."
+                )
+            if r.status_code >= 400:
+                raise RuntimeError(
+                    f"ElevenLabs TTS failed ({r.status_code}) for voice "
+                    f"'{voice_id}': {r.text[:300]}"
+                )
             raw.write_bytes(r.content)
 
     # Combine atempo (optional) and silence-trim in a single ffmpeg pass.

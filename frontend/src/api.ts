@@ -26,6 +26,7 @@ export const API = {
   },
   voice: {
     clone: `${API_BASE}/clone-voice`,
+    list: `${API_BASE}/voices`,
   },
 };
 

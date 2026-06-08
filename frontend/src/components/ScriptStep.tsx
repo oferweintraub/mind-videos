@@ -215,11 +215,11 @@ export function ScriptStep({
       </div>
 
       <div className="footer-row">
-        <button type="button" onClick={onBack} className="secondary">
-          {t("back")}
-        </button>
         <button type="button" onClick={onContinue} className="primary" disabled={!canContinue}>
           {t("continueToVoice")}
+        </button>
+        <button type="button" onClick={onBack} className="secondary">
+          {t("back")}
         </button>
       </div>
     </div>

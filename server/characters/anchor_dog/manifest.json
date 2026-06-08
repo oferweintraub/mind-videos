@@ -1,0 +1,16 @@
+{
+  "slug": "anchor_dog",
+  "display_name": "anchor dog",
+  "description": "",
+  "style": "south_park",
+  "voice": {
+    "voice_id": "",
+    "voice_name": "ג׳יני",
+    "stability": 0.5,
+    "similarity": 0.75,
+    "style": 0.5,
+    "tempo": 1.0
+  },
+  "image": "image.png",
+  "public": true
+}
