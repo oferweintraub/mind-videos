@@ -2,6 +2,19 @@ import type { AppState } from "../types";
 import { estimateEpisode } from "../utils";
 import { useI18n } from "../i18n/I18nProvider";
 
+// Visual style for a scene's generated animation — same set the character
+// builder offers (CastStep STYLE_OPTIONS).
+const SCENE_STYLE_OPTIONS = [
+  "realistic",
+  "lego",
+  "muppet",
+  "pixar",
+  "ghibli",
+  "comic",
+  "anime",
+  "south_park",
+];
+
 // Background presets — mirror the character STYLE_OPTIONS pattern in CastStep.
 // "custom" reveals a free-text input so the user can describe any scene.
 const BACKGROUND_OPTIONS = [
@@ -116,7 +129,17 @@ export function ScriptStep({
                     <div className="segment-header">
                       <div className="segment-selects">
                         <span className="scene-badge">🎬 {t("sceneLabel")}</span>
-                        {narratorSelect}
+                        <select
+                          title="Visual style"
+                          value={segment.style ?? "realistic"}
+                          onChange={(event) => onUpdateSegment(index, { style: event.target.value })}
+                        >
+                          {SCENE_STYLE_OPTIONS.map((style) => (
+                            <option key={style} value={style}>
+                              {style}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       {moveControls}
                     </div>

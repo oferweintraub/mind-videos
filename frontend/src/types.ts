@@ -16,6 +16,7 @@ export type Segment = {
   background?: string;
   kind?: "dialogue" | "scene";
   animationPrompt?: string;   // scene only — text-to-video prompt
+  style?: string;             // scene only — visual style (lego, pixar, …)
 };
 
 export type RenderResult = {

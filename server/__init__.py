@@ -618,6 +618,90 @@ async def characters_generate(body: GenerateCandidatesBody):
 
 
 # ---------------------------------------------------------------------------
+# Per-user projects — saved to projects/<user>.json, listed in a dropdown
+# ---------------------------------------------------------------------------
+
+PROJECTS_DIR = SERVER_ROOT / "projects"
+
+
+def _projects_path(email: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9_.@-]", "_", _normalize_email(email)) or "anon"
+    return PROJECTS_DIR / f"{safe}.json"
+
+
+def _load_user_projects(email: str) -> dict:
+    p = _projects_path(email)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) or {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_user_projects(email: str, projects: dict) -> None:
+    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    _projects_path(email).write_text(
+        json.dumps(projects, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+class SaveProjectBody(BaseModel):
+    email: str
+    name: str
+    data: dict
+
+
+class DeleteProjectBody(BaseModel):
+    email: str
+    name: str
+
+
+@app.get("/projects")
+def projects_list(email: str):
+    """Names + timestamps of a user's saved projects (lightweight, for the dropdown)."""
+    projects = _load_user_projects(email)
+    out = [
+        {"name": name, "updated_at": rec.get("updated_at", 0)}
+        for name, rec in projects.items()
+    ]
+    out.sort(key=lambda p: p["updated_at"], reverse=True)
+    return {"projects": out}
+
+
+@app.get("/projects/get")
+def projects_get(email: str, name: str):
+    """Full saved data for one project."""
+    projects = _load_user_projects(email)
+    rec = projects.get(name)
+    if rec is None:
+        raise HTTPException(404, f"no project named '{name}' for this user")
+    return {"name": name, "data": rec.get("data", {}), "updated_at": rec.get("updated_at", 0)}
+
+
+@app.post("/projects/save")
+def projects_save(body: SaveProjectBody):
+    if not body.email.strip():
+        raise HTTPException(400, "email is required to save a project")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "project name is required")
+    projects = _load_user_projects(body.email)
+    projects[name] = {"data": body.data, "updated_at": time.time()}
+    _write_user_projects(body.email, projects)
+    return {"ok": True, "name": name}
+
+
+@app.post("/projects/delete")
+def projects_delete(body: DeleteProjectBody):
+    projects = _load_user_projects(body.email)
+    if body.name in projects:
+        del projects[body.name]
+        _write_user_projects(body.email, projects)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
 # Voice catalog (stock ElevenLabs voices) — backs the searchable voice picker
 # ---------------------------------------------------------------------------
 

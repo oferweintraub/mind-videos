@@ -325,13 +325,64 @@ async def mux_audio_over_video(
     return output_path
 
 
+async def _has_audio(path: Path) -> bool:
+    """True if the file has at least one audio stream."""
+    proc = await asyncio.create_subprocess_exec(
+        "ffprobe", "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=codec_type",
+        "-of", "csv=p=0", str(path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out, _ = await proc.communicate()
+    return b"audio" in out
+
+
+async def _ensure_audio(path: Path) -> Path:
+    """Return a clip guaranteed to have an audio stream — adds a silent stereo
+    track to clips that have none (e.g. narration-free scenes). Without this,
+    `concat -c copy` drops audio for the ENTIRE video when any segment lacks it.
+    """
+    path = Path(path)
+    if await _has_audio(path):
+        return path
+    fixed = path.parent / f"{path.stem}_silentaud.mp4"
+    if not fixed.exists():
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y",
+            "-i", str(path),
+            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+            "-c:v", "copy", "-c:a", "aac", "-shortest",
+            str(fixed),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+        if proc.returncode != 0 or not fixed.exists():
+            return path  # best effort — fall back to the original
+    return fixed
+
+
 async def concat(video_paths: list, output_path: Path) -> Path:
     output_path = Path(output_path)
+    # Normalize: every clip must carry an audio stream, else stream-copy concat
+    # silently drops audio for the whole output.
+    normalized = [await _ensure_audio(Path(vp)) for vp in video_paths]
+    # Regenerate if the cached final is stale — i.e. any segment clip is newer
+    # than it (a segment was added/changed/re-rendered). Without this, adding a
+    # scene leaves the old final.mp4 in place and the new clip never appears.
     if output_path.exists():
-        return output_path
+        out_mtime = output_path.stat().st_mtime
+        inputs_newer = any(
+            Path(vp).exists() and Path(vp).stat().st_mtime > out_mtime for vp in normalized
+        )
+        if not inputs_newer:
+            return output_path
+        output_path.unlink(missing_ok=True)
     lst = output_path.parent / f"{output_path.stem}_list.txt"
     with open(lst, "w") as f:
-        for vp in video_paths:
+        for vp in normalized:
             f.write(f"file '{Path(vp).resolve()}'\n")
 
     proc = await asyncio.create_subprocess_exec(

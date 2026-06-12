@@ -887,12 +887,22 @@ button.destructive {
   }
 }
 
+.video-preview-container {
+  display: grid;
+  grid-template-rows: 2fr 2fr 10fr 10fr 5fr 5fr;
+}
+
+.smallcontainer {
+  max-height: 5fr;
+}
+
 .videoPreview {
   width: auto;
-  height: 50rem;
+  height: 20rem;
   margin: auto;
   border-radius: var(--radius);
 }
+ 
 
 .auth-shell {
   display: grid;

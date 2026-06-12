@@ -135,16 +135,20 @@ async def run(script_path: Path, episode_dir: Path):
 
     char_cache: dict = {}
     video_paths = []
-    for i, seg in enumerate(script.segments):
-        if seg.character not in char_cache:
-            char_cache[seg.character] = load_character(seg.character)
-        char = char_cache[seg.character]
 
-        seg_id = f"seg{i:02d}_{seg.character}"
+    def _resolve_voice(slug: str):
+        """Load a character + its effective voice id. Only called when a segment
+        actually needs a voice (dialogue, or a scene WITH narration) — silent
+        scenes don't need a character at all."""
+        if slug not in char_cache:
+            char_cache[slug] = load_character(slug)
+        c = char_cache[slug]
+        return c, voice_overrides.get(slug, c.voice.voice_id)
+
+    for i, seg in enumerate(script.segments):
+        seg_id = f"seg{i:02d}_{seg.character or 'scene'}"
         audio_path = audio_dir / f"{seg_id}.mp3"
         video_path = video_dir / f"{seg_id}.mp4"
-
-        voice_id = voice_overrides.get(seg.character, char.voice.voice_id)
 
         def _progress(label):
             """Build a ~5s-throttled status printer for a fal.ai job."""
@@ -157,8 +161,7 @@ async def run(script_path: Path, episode_dir: Path):
 
         # ── Animation scene: generate a clip from a text prompt, narrate over it ──
         if seg.is_scene:
-            print(f"\n>> Segment #{i+1}: 🎬 scene — \"{seg.animation}\" "
-                  f"(narrated by @{seg.character})")
+            print(f"\n>> Segment #{i+1}: 🎬 scene — \"{seg.animation}\"")
             anim_path = video_dir / f"{seg_id}_anim.mp4"
             t0 = time.time()
             print("   anim:    generating via fal.ai Kling (text-to-video)…")
@@ -169,6 +172,7 @@ async def run(script_path: Path, episode_dir: Path):
             print(f"   anim:    {anim_path.relative_to(ROOT)}  [rendered in {time.time()-t0:.0f}s]")
 
             if seg.text.strip():
+                char, voice_id = _resolve_voice(seg.character)
                 await generate_tts(
                     text=seg.text,
                     voice_id=voice_id,
@@ -191,6 +195,7 @@ async def run(script_path: Path, episode_dir: Path):
             continue
 
         # ── Dialogue: TTS the line, lip-sync it onto the character's still ──
+        char, voice_id = _resolve_voice(seg.character)
         print(f"\n>> Segment #{i+1}: @{seg.character} ({len(seg.text)} chars)")
         if voice_id != char.voice.voice_id:
             print(f"   voice:   override -> {voice_id}")

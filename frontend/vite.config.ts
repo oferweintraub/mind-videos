@@ -18,6 +18,7 @@ export default defineConfig(({ mode }) => {
         "/voices": target,
         "/videos": target,
         "/clone-voice": target,
+        "/projects": target,
       },
     },
   };

@@ -1,0 +1,16 @@
+{
+  "slug": "blondi",
+  "display_name": "ילד בלונדיני",
+  "description": "ילד בלונדיני שמן עם חיוך ",
+  "style": "lego",
+  "voice": {
+    "voice_id": "onwK4e9ZLuTAKqWW03F9",
+    "voice_name": "Daniel",
+    "stability": 0.5,
+    "similarity": 0.75,
+    "style": 0.5,
+    "tempo": 1.0
+  },
+  "image": "image.png",
+  "public": true
+}

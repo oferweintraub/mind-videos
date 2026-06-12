@@ -60,12 +60,12 @@ export function PreviewStep({ state, onBack, onNewProject }: PreviewStepProps) {
   }
 
   return (
-    <div>
+    <div className="video-preview-container">
       <h2>{t("isReady", { title: result.title || state.title || t("untitled") })}</h2>
       <p className="muted">{t("watchPreview")}</p>
       <div className="video-preview">
         {videoUrl ? (
-          <video className="videoPreview" key={videoUrl} width="100%" height="auto" controls autoPlay>
+          <video className="videoPreview" key={videoUrl} width="50rem" height="auto" controls autoPlay>
             <source src={videoUrl} type="video/mp4" />
             {t("videoNotSupported")}
           </video>
@@ -74,16 +74,16 @@ export function PreviewStep({ state, onBack, onNewProject }: PreviewStepProps) {
         )}
       </div>
       {error && <div className="warning-card">{error}</div>}
-      <div className="summary-row">
-        <div className="card small-card">
+       <div >
+        <div className="card small-card smallcontainer">
           <p className="tiny">{t("renderedIn")}</p>
           <h2>{Math.floor((result.elapsed ?? 0) / 60)}m {(result.elapsed ?? 0) % 60}s</h2>
         </div>
-        <div className="card small-card">
+        <div className="card small-card smallcontainer">
           <p className="tiny">{t("spent")}</p>
           <h2>${(result.cost ?? 0).toFixed(2)}</h2>
         </div>
-      </div>
+       </div>
       <div className="footer-row">
         <button type="button" className="secondary" onClick={onBack}>
           {t("back")}

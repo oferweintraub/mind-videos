@@ -28,6 +28,12 @@ export const API = {
     clone: `${API_BASE}/clone-voice`,
     list: `${API_BASE}/voices`,
   },
+  projects: {
+    list: `${API_BASE}/projects`,
+    get: `${API_BASE}/projects/get`,
+    save: `${API_BASE}/projects/save`,
+    delete: `${API_BASE}/projects/delete`,
+  },
 };
 
 export function getJobUrl(jobId: string): string {

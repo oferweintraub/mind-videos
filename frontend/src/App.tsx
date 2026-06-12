@@ -15,8 +15,10 @@ import { PreviewStep } from "./components/PreviewStep";
 import { CharacterLibrary } from "./components/CharacterLibrary";
 import { AuthScreen } from "./components/AuthScreen";
 import { estimateEpisode, safeSlug } from "./utils";
+import { API } from "./api";
 import { idstore } from "./redux/IDStore";
 import { SET_API_KEY, SET_SHARE_KEYS, LOAD_SETTINGS, RESET_SETTINGS } from "./redux/settingsActions";
+import { SET_PROJECTS, SET_CURRENT_PROJECT, RESET_PROJECTS } from "./redux/projectsActions";
 import {
   loadEncryptedSettingsFromLocalStorage,
   saveEncryptedSettingsToLocalStorage,
@@ -108,6 +110,9 @@ function App() {
   const [authPassword, setAuthPassword] = useState<string | null>(null);
   const dispatch = useDispatch();
   const settings = useSelector((state: RootState) => state.settings);
+  const savedProjects = useSelector((state: RootState) => state.projects.list);
+  const currentProject = useSelector((state: RootState) => state.projects.current);
+  const [savingProject, setSavingProject] = useState(false);
   const { t } = useI18n();
 
   useEffect(() => {
@@ -131,6 +136,87 @@ function App() {
       projectId: current.projectId,
       recentProjects: current.recentProjects,
     }));
+    dispatch({ type: SET_CURRENT_PROJECT, name: null });
+  };
+
+  // ── Per-user saved projects (server: projects/<user>.json) ────────────────
+  const fetchProjects = async (email: string) => {
+    try {
+      const resp = await fetch(`${API.projects.list}?email=${encodeURIComponent(email)}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      dispatch({ type: SET_PROJECTS, list: data.projects || [] });
+    } catch {
+      /* offline — dropdown just stays empty */
+    }
+  };
+
+  useEffect(() => {
+    if (state.authUser?.email) fetchProjects(state.authUser.email);
+    else dispatch({ type: RESET_PROJECTS });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.authUser?.email]);
+
+  const saveProject = async () => {
+    if (!state.authUser?.email) return;
+    const suggested = (state.title || currentProject || "").trim();
+    const name = window.prompt("Save project as:", suggested);
+    if (!name || !name.trim()) return;
+    setSavingProject(true);
+    try {
+      const data = {
+        title: state.title,
+        cast: state.cast,
+        segments: state.segments,
+        voiceSamples: state.voiceSamples,
+        result: state.result,
+      };
+      const resp = await fetch(API.projects.save, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: state.authUser.email, name: name.trim(), data }),
+      });
+      if (!resp.ok) throw new Error(`save failed: ${resp.status}`);
+      dispatch({ type: SET_CURRENT_PROJECT, name: name.trim() });
+      await fetchProjects(state.authUser.email);
+    } catch (err) {
+      window.alert("Could not save project: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  const loadProject = async (name: string) => {
+    if (!name || !state.authUser?.email) return;
+    try {
+      const url = `${API.projects.get}?email=${encodeURIComponent(state.authUser.email)}&name=${encodeURIComponent(name)}`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`load failed: ${resp.status}`);
+      const { data } = await resp.json();
+      setState((current) => ({
+        ...initialState,
+        authUser: current.authUser,
+        projectId: current.projectId,
+        recentProjects: current.recentProjects,
+        title: data.title || "",
+        cast: Array.isArray(data.cast) ? data.cast : [],
+        segments: Array.isArray(data.segments) ? data.segments : [],
+        voiceSamples: data.voiceSamples || {},
+        result: data.result || null,
+        step: (Array.isArray(data.cast) && data.cast.length ? 2 : 1) as AppState["step"],
+      }));
+      dispatch({ type: SET_CURRENT_PROJECT, name });
+    } catch (err) {
+      window.alert("Could not load project: " + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const startNewProject = () => {
+    const hasWork = state.cast.length > 0 || state.segments.length > 0 || state.title.trim() !== "";
+    if (hasWork && !window.confirm("Start a new project? This clears the current cast and script.")) {
+      return;
+    }
+    resetProject();
   };
 
   const loadDemo = () => {
@@ -215,7 +301,7 @@ function App() {
       ...current,
       segments: [
         ...current.segments,
-        { character, text: "", kind: "scene", animationPrompt: "" },
+        { character, text: "", kind: "scene", animationPrompt: "", style: "realistic" },
       ],
     }));
   };
@@ -358,7 +444,35 @@ function App() {
             <div className="topbar-user">{state.authUser?.email || t("unknownUser")}</div>
           </div>
           <div className="topbar-actions">
-            <button type="button" className="icon-button" onClick={toggleSettings} aria-label={t("openSettings")}> 
+            <select
+              className="project-select"
+              title="Open a saved project"
+              value={currentProject ?? ""}
+              onChange={(event) => {
+                if (event.target.value) loadProject(event.target.value);
+              }}
+            >
+              <option value="">
+                {savedProjects.length ? "Open project…" : "No saved projects"}
+              </option>
+              {savedProjects.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="logout unselectable"
+              onClick={saveProject}
+              disabled={savingProject}
+            >
+              {savingProject ? "Saving…" : "💾 Save"}
+            </button>
+            <button type="button" className="logout unselectable" onClick={startNewProject}>
+              ＋ New project
+            </button>
+            <button type="button" className="icon-button" onClick={toggleSettings} aria-label={t("openSettings")}>
             <Icon icon={cog} size={20} />
           </button>
             <button type="button" className="logout unselectable" onClick={logoutUser}>

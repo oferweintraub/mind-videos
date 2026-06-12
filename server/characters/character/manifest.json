@@ -4,8 +4,8 @@
   "description": "",
   "style": "lego",
   "voice": {
-    "voice_id": "NNXapfAkq3WQmMqS3FLr",
-    "voice_name": "withanimation_anchor_female",
+    "voice_id": "",
+    "voice_name": "",
     "stability": 0.5,
     "similarity": 0.75,
     "style": 0.5,

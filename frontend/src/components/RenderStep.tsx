@@ -79,7 +79,14 @@ export function RenderStep({ state, onBack, onVoiceCloned, onRenderComplete, onN
     const usedSlugs = new Set<string>();
     state.segments.forEach((seg, i) => {
       const n = i + 1;
-      const isScene = seg.kind === "scene";
+      // Scenes have no character/narrator to choose — they just need an
+      // animation description; narration is optional.
+      if (seg.kind === "scene") {
+        if (!(seg.animationPrompt || "").trim()) {
+          errors.push(`Segment ${n}: the scene needs an animation description.`);
+        }
+        return;
+      }
       if (!seg.character) {
         errors.push(`Segment ${n}: no character assigned.`);
       } else if (!castBySlug[seg.character]) {
@@ -88,10 +95,7 @@ export function RenderStep({ state, onBack, onVoiceCloned, onRenderComplete, onN
         usedSlugs.add(seg.character);
       }
       if (!seg.text.trim()) {
-        errors.push(`Segment ${n}: ${isScene ? "scene narration" : "dialogue"} is empty.`);
-      }
-      if (isScene && !(seg.animationPrompt || "").trim()) {
-        errors.push(`Segment ${n}: the scene needs an animation description.`);
+        errors.push(`Segment ${n}: dialogue is empty.`);
       }
     });
 
@@ -155,7 +159,22 @@ export function RenderStep({ state, onBack, onVoiceCloned, onRenderComplete, onN
 
       // First: save the script
       const scriptContent = `# ${state.title || "Untitled"}\n\n${state.segments
-        .map((seg) => `## ${seg.character}\n${seg.text}`)
+        .map((seg) => {
+          if (seg.kind === "scene") {
+            // Scene → "## <narrator> (anim: <prompt>[, <style> style])" with
+            // optional narration on the next line. The style is folded into the
+            // text-to-video prompt so the generated clip matches it. Scenes have
+            // no character picker, so the narrator (only used if there's
+            // narration) falls back to the first cast member.
+            const prompt = (seg.animationPrompt || "").trim();
+            const style = (seg.style || "").trim();
+            const animSpec = style ? `${prompt}, ${style} style` : prompt;
+            const narrator = seg.character || state.cast[0]?.slug || "scene";
+            const head = `## ${narrator} (anim: ${animSpec})`;
+            return seg.text.trim() ? `${head}\n${seg.text}` : head;
+          }
+          return `## ${seg.character}\n${seg.text}`;
+        })
         .join("\n\n")}`;
       const scriptResp = await fetch(API.script.create, {
         method: "POST",

@@ -73,3 +73,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Per-user saved projects (server writes these)
+server/projects/
+projects/

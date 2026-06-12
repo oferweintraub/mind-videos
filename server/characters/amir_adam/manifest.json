@@ -1,0 +1,16 @@
+{
+  "slug": "amir_adam",
+  "display_name": "amir_Adam",
+  "description": "",
+  "style": "lego",
+  "voice": {
+    "voice_id": "pNInz6obpgDQGcFmaJgB",
+    "voice_name": "Adam - Dominant, Firm",
+    "stability": 0.5,
+    "similarity": 0.75,
+    "style": 0.5,
+    "tempo": 1.25
+  },
+  "image": "image.png",
+  "public": true
+}
